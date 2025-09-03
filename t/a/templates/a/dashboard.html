@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Auto-Ticket Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f9f9f9;
+        }
+        header {
+            background: #333;
+            color: #fff;
+            padding: 10px;
+        }
+        main {
+            background: #fff;
+            padding: 20px;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(255, 0, 0, 0.1);
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 15px;
+        }
+        table th, table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+        }
+        table th {
+            background: #eee;
+        }
+        button {
+            margin-right: 10px;
+            padding: 6px 12px;
+        }
+        details {
+            margin-bottom: 12px;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h2>🎫 Auto-Ticketing System</h2>
+</header>
+<main>
+    <h1>📊 Auto-Ticket Dashboard (Django)</h1>
+
+    {% if error %}
+      <div style="color: red; font-weight: bold;">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label>Session Data (.xlsx):</label><br>
+        <input type="file" name="session_file" required><br><br>
+
+        <label>KPI Data (.xlsx):</label><br>
+        <input type="file" name="kpi_file" required><br><br>
+
+        <label>Metadata / advancetags (.xlsx):</label><br>
+        <input type="file" name="meta_file" required title="Upload Metadata or advancetags Excel file" placeholder="Select metadata .xlsx file"><br><br>
+
+        <button type="submit">🚀 Generate Tickets</button>
+        {% if tickets %}
+            <button type="submit" name="download" value="1">⬇️ Download Tickets CSV</button>
+        {% endif %}
+    </form>
+
+    {% if df_info %}
+        <h3>Results</h3>
+        <p>Sessions: {{ df_info.sessions }} | KPI: {{ df_info.kpi }} | Meta: {{ df_info.meta }}</p>
+        <p>Tickets generated: {{ df_info.tickets_generated }} | Saved: {{ df_info.tickets_saved }}</p>
+    {% endif %}
+
+            <details>
+                <summary>Ticket {{ forloop.counter }}</summary>
+                <pre style="white-space: pre-wrap;">{{ t }}</pre>
+            </details>
+                <summary>Ticket {{ forloop.counter }}</summary>
+                <pre style="white-space: pre-wrap;">{{ t }}</pre>
+            </details>
+        {% endfor %}
+    {% endif %}
+
+    <hr>
+    <h2>Saved Tickets (Recent)</h2>
+    {% if recent_tickets %}
+      <table>
+        <tr>
+          <th>Created</th>
+          <th>Session ID</th>
+          <th>Asset</th>
+          <th>Root cause</th>
+          <th>Excerpt</th>
+        </tr>
+        {% for t in recent_tickets %}
+        <tr>
+          <td>{{ t.created_at }}</td>
+          <td>{{ t.session_id }}</td>
+          <td>{{ t.asset_name }}</td>
+          <td>{{ t.root_cause }}</td>
+          <td><pre style="max-height:80px; overflow:auto;">{{ t.ticket_text|truncatechars:200 }}</pre></td>
+        </tr>
+        {% endfor %}
+      </table>
+    {% else %}
+      <p>No saved tickets yet.</p>
+    {% endif %}
+</main>
+</body>
+</html>
