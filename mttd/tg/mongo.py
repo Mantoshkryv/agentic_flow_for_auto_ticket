@@ -6,7 +6,7 @@ from pymongo import MongoClient, errors
 class MongoService:
     def __init__(self):
         """Initialize MongoDB connection"""
-        uri = os.getenv("MONGO_URI", "mongodb+srv://krmanto:Learn9900@cluster0.vp38vxp.mongodb.net/")
+        uri = os.getenv("MONGO_URI", "mongodb+srv://krmanto:Learn9900@cluster0.vp38vxp.mongodb.net/mttddb?retryWrites=true&w=majority")
         db_name = os.getenv("MONGO_DB", "mttddb")
         try:
             self.client = MongoClient(uri, serverSelectionTimeoutMS=5000)
@@ -38,3 +38,4 @@ class MongoService:
                 self.db["tickets"].insert_many(tickets)
             except Exception as e:
                 raise RuntimeError(f"Failed to insert tickets: {e}")
+
