@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto-Ticket Dashboard</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f9f9f9; line-height: 1.6; }
+        header { background: #333; color: #fff; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
+        header h2 { margin: 0; }
+        main { background: #fff; padding: 20px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        button { padding: 10px 20px; margin-right: 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        button[type="submit"] { background: #007bff; color: #fff; }
+        button[type="submit"]:hover { background: #0056b3; }
+        button[name="download"] { background: #28a745; color: #fff; }
+        button[name="download"]:hover { background: #1e7e34; }
+        .error { color: #dc3545; background: #f8d7da; padding: 10px; border-radius: 4px; margin-bottom: 20px; }
+        .results { background: #d4edda; border: 1px solid #c3e6cb; padding: 15px; border-radius: 4px; margin: 20px 0; }
+        details { margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        summary { padding: 10px; background: #f8f9fa; font-weight: bold; cursor: pointer; }
+        summary:hover { background: #e9ecef; }
+        details pre { margin: 0; padding: 15px; white-space: pre-wrap; word-wrap: break-word; background: #f8f9fa; overflow-x: auto; }
+        table { border-collapse: collapse; width: 100%; margin-top: 15px; overflow-x: auto; display: block; }
+        table th, table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        table th { background: #f8f9fa; position: sticky; top: 0; }
+        table tr:nth-child(even) { background-color: #f9f9f9; }
+        table tr:hover { background-color: #f5f5f5; }
+        .excerpt { max-width: 200px; max-height: 80px; overflow: auto; font-size: 12px; }
+        .no-data { text-align: center; color: #6c757d; font-style: italic; padding: 20px; }
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            main { padding: 15px; }
+            button { width: 100%; margin-bottom: 10px; }
+            table { display: table; white-space: normal; }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h2>🎫 Auto-Ticketing System</h2>
+</header>
+<main>
+    <h1>📊 Auto-Ticket Dashboard</h1>
+
+    {% if error %}
+        <div class="error">{{ error }}</div>
+    {% endif %}
+
+    <form method="post">
+        {% csrf_token %}
+        <button type="submit">🚀 Generate Tickets</button>
+        {% if tickets %}
+            <button type="submit" name="download" value="1">⬇️ Download Tickets CSV</button>
+        {% endif %}
+    </form>
+
+    {% if df_info %}
+        <div class="results">
+            <p><strong>Tickets generated:</strong> {{ df_info.tickets_generated }} | 
+               <strong>Saved:</strong> {{ df_info.tickets_saved }}</p>
+        </div>
+    {% endif %}
+
+    {% if tickets %}
+        <h3>Generated Tickets</h3>
+        {% for ticket in tickets %}
+            <details>
+                <summary>Ticket {{ forloop.counter }}</summary>
+                <pre>{{ ticket }}</pre>
+            </details>
+        {% endfor %}
+    {% endif %}
+
+    <hr>
+    <h2>Saved Tickets (Recent)</h2>
+    {% if recent_tickets %}
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Created</th>
+                        <th>Session ID</th>
+                        <th>Asset</th>
+                        <th>Root Cause</th>
+                        <th>Excerpt</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in recent_tickets %}
+                        <tr>
+                            <td>{{ t.created_at|date:"M d, Y H:i" }}</td>
+                            <td>{{ t.session_id }}</td>
+                            <td>{{ t.asset_name }}</td>
+                            <td>{{ t.root_cause }}</td>
+                            <td class="excerpt">{{ t.ticket_text|truncatechars:200 }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="no-data">No saved tickets yet.</div>
+    {% endif %}
+</main>
+</body>
+</html>
