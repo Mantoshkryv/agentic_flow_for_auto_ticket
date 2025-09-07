@@ -6,7 +6,7 @@ from pymongo import MongoClient, errors
 class MongoService:
     def __init__(self):
         """Initialize MongoDB connection"""
-        uri = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+        uri = os.getenv("MONGO_URI", "mongodb+srv://krmanto:Learn9900@cluster0.vp38vxp.mongodb.net/")
         db_name = os.getenv("MONGO_DB", "mttddb")
         try:
             self.client = MongoClient(uri, serverSelectionTimeoutMS=5000)
