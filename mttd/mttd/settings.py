@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-ie^^ccxe=dnr74_2w-k$(y2b%%xs=i2kub9b3_@p^n0v(ncn*7
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["*"]
 
 
 # Application definition
@@ -129,5 +129,6 @@ MIGRATION_MODULES = {
     'auth': 'mongo_migrations.auth',
     'contenttypes': 'mongo_migrations.contenttypes',
 }
+
 
 
