@@ -1,1 +1,2 @@
 django_mongodb_backend
+pandas
