@@ -29,6 +29,18 @@ DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
 
+import os
+RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+    ALLOWED_HOSTS.append(".onrender.com")  # covers your Render domain
+
+# CSRF trusted origins (must include scheme: http/https)
+CSRF_TRUSTED_ORIGINS = [
+    "https://autoticket.onrender.com",
+]
+
+
 
 # Application definition
 
@@ -129,6 +141,7 @@ MIGRATION_MODULES = {
     'auth': 'mongo_migrations.auth',
     'contenttypes': 'mongo_migrations.contenttypes',
 }
+
 
 
 
