@@ -199,7 +199,7 @@
         <!-- Navigation Tabs -->
         <ul class="nav nav-tabs nav-justified mb-0" id="mainTabs" role="tablist">
             <li class="nav-item" role="presentation">
-                <a class="nav-link" href="dashboard.html">
+                <a class="nav-link" href="{% url 'dashboard' %}">
                     <i class="fas fa-plus-circle me-2"></i>
                     <span class="d-none d-md-inline">Ticket Generation</span>
                     <span class="d-md-none">Generate</span>
@@ -214,7 +214,7 @@
                 </button>
             </li>
             <li class="nav-item" role="presentation">
-                <a class="nav-link" href="analytics.html">
+                <a class="nav-link" href="{% url 'analytics' %}">
                     <i class="fas fa-chart-bar me-2"></i>
                     <span class="d-none d-md-inline">Analytics</span>
                     <span class="d-md-none">Stats</span>
