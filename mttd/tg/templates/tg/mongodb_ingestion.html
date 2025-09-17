@@ -1,0 +1,335 @@
+{% extends "tg/base.html" %}
+{% block title %}MongoDB Data Ingestion | TG Dashboard{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="page-header text-center">
+            <h1><i class="bi bi-database me-2"></i>MongoDB Data Ingestion</h1>
+            <p class="lead">Process existing data directly from MongoDB collections</p>
+        </div>
+    </div>
+</div>
+
+<!-- Data Overview Cards -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-play-circle text-primary mb-2" style="font-size: 2.5rem;"></i>
+                <h3 class="text-primary">{{ session_count|default:0 }}</h3>
+                <h6 class="text-muted mb-0">Sessions Available</h6>
+                <small class="text-muted">Ready for processing</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-graph-up text-success mb-2" style="font-size: 2.5rem;"></i>
+                <h3 class="text-success">{{ kpi_count|default:0 }}</h3>
+                <h6 class="text-muted mb-0">KPI Records</h6>
+                <small class="text-muted">Performance metrics</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-tags text-warning mb-2" style="font-size: 2.5rem;"></i>
+                <h3 class="text-warning">{{ metadata_count|default:0 }}</h3>
+                <h6 class="text-muted mb-0">Metadata Records</h6>
+                <small class="text-muted">Device & location data</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="bi bi-database text-info mb-2" style="font-size: 2.5rem;"></i>
+                <h3 class="text-info">
+                    {% if session_count > 0 or kpi_count > 0 or metadata_count > 0 %}
+                        <i class="bi bi-check-circle-fill text-success"></i>
+                    {% else %}
+                        <i class="bi bi-x-circle-fill text-danger"></i>
+                    {% endif %}
+                </h3>
+                <h6 class="text-muted mb-0">Data Status</h6>
+                <small class="text-muted">
+                    {% if session_count > 0 or kpi_count > 0 or metadata_count > 0 %}
+                        Ready to process
+                    {% else %}
+                        No data available
+                    {% endif %}
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Processing Options -->
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-gear me-2"></i>MongoDB Processing Options</h5>
+            </div>
+            <div class="card-body">
+                {% if session_count > 0 or kpi_count > 0 or metadata_count > 0 %}
+                    <!-- Process All Data -->
+                    <div class="alert alert-success border-0 mb-4">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <h6 class="alert-heading mb-2">
+                                    <i class="bi bi-check-circle me-2"></i>MongoDB Data Ready
+                                </h6>
+                                <p class="mb-0">
+                                    Found <strong>{{ session_count }} sessions</strong>, <strong>{{ kpi_count }} KPIs</strong>, 
+                                    and <strong>{{ metadata_count }} metadata records</strong> in your MongoDB collections.
+                                    Process this data to generate tickets automatically.
+                                </p>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <form method="post" style="display: inline;">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-success btn-lg">
+                                        <i class="bi bi-play-circle me-2"></i>Process All Data
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Data Breakdown -->
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="card bg-light border-0">
+                                <div class="card-body text-center">
+                                    <i class="bi bi-play-circle text-primary mb-2" style="font-size: 2rem;"></i>
+                                    <h6>Session Data</h6>
+                                    <p class="text-muted small mb-0">
+                                        User sessions with playback information, failure states, and video metrics.
+                                        Essential for ticket generation.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card bg-light border-0">
+                                <div class="card-body text-center">
+                                    <i class="bi bi-graph-up text-success mb-2" style="font-size: 2rem;"></i>
+                                    <h6>KPI Data</h6>
+                                    <p class="text-muted small mb-0">
+                                        Performance indicators and streaming quality metrics.
+                                        Enhances ticket diagnosis accuracy.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card bg-light border-0">
+                                <div class="card-body text-center">
+                                    <i class="bi bi-tags text-warning mb-2" style="font-size: 2rem;"></i>
+                                    <h6>Metadata</h6>
+                                    <p class="text-muted small mb-0">
+                                        Device info, location data, CDN details.
+                                        Enables advanced correlation analysis.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                {% else %}
+                    <!-- No Data Available -->
+                    <div class="alert alert-warning border-0 mb-4">
+                        <div class="text-center py-4">
+                            <i class="bi bi-exclamation-triangle text-warning" style="font-size: 4rem;"></i>
+                            <h4 class="text-warning mt-3">No Data Available in MongoDB</h4>
+                            <p class="text-muted">
+                                Your MongoDB collections appear to be empty. You can either:
+                            </p>
+                            <div class="btn-group mt-3">
+                                <a href="{% url 'tg:upload_files' %}" class="btn btn-primary">
+                                    <i class="bi bi-cloud-upload me-1"></i>Upload Files First
+                                </a>
+                                <button class="btn btn-outline-secondary" onclick="location.reload()">
+                                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh Page
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+
+                <!-- Processing Information -->
+                <div class="card bg-light border-0 mt-4">
+                    <div class="card-body">
+                        <h6><i class="bi bi-info-circle me-2"></i>How MongoDB Ingestion Works</h6>
+                        <ol class="mb-0">
+                            <li><strong>Data Retrieval:</strong> Fetch existing data from your MongoDB collections (sessions, kpi_data, advancetags)</li>
+                            <li><strong>AI Processing:</strong> Run the AutoTicketMVP engine to analyze data and identify failures</li>
+                            <li><strong>Ticket Generation:</strong> Create tickets with proper status assignment (new, assigned teams)</li>
+                            <li><strong>MongoDB Storage:</strong> Save generated tickets back to MongoDB with full traceability</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Processing Configuration (Optional) -->
+<div class="row mt-4">
+    <div class="col-lg-8 offset-lg-2">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-sliders me-2"></i>Advanced Configuration</h5>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="true" id="auto_assign" name="auto_assign" checked>
+                                <label class="form-check-label" for="auto_assign">
+                                    Auto-assign teams based on failure type
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="true" id="set_priority" name="set_priority" checked>
+                                <label class="form-check-label" for="set_priority">
+                                    Auto-set priority based on confidence score
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-6">
+                            <label for="default_status" class="form-label">Default Ticket Status</label>
+                            <select class="form-select" id="default_status" name="default_status">
+                                <option value="new" selected>New</option>
+                                <option value="inprogress">In Progress</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="confidence_threshold" class="form-label">Minimum Confidence Score</label>
+                            <select class="form-select" id="confidence_threshold" name="confidence_threshold">
+                                <option value="0.5">50% (Low)</option>
+                                <option value="0.7" selected>70% (Medium)</option>
+                                <option value="0.8">80% (High)</option>
+                                <option value="0.9">90% (Very High)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="text-center mt-4">
+                        {% if session_count > 0 or kpi_count > 0 or metadata_count > 0 %}
+                            <button type="submit" class="btn btn-success btn-lg px-5">
+                                <i class="bi bi-play-circle me-2"></i>Process MongoDB Data with Settings
+                            </button>
+                        {% else %}
+                            <button type="button" class="btn btn-secondary btn-lg px-5" disabled>
+                                <i class="bi bi-x-circle me-2"></i>No Data Available to Process
+                            </button>
+                        {% endif %}
+                        <div class="mt-2">
+                            <small class="text-muted">Processing may take a few minutes depending on data volume</small>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row mt-4">
+    <div class="col-12 text-center">
+        <div class="btn-group" role="group">
+            <a href="{% url 'tg:dashboard' %}" class="btn btn-outline-primary">
+                <i class="bi bi-arrow-left me-1"></i>Back to Dashboard
+            </a>
+            <a href="{% url 'tg:upload_files' %}" class="btn btn-outline-secondary">
+                <i class="bi bi-cloud-upload me-1"></i>Upload Files Instead
+            </a>
+            <a href="{% url 'tg:ticket_list' %}" class="btn btn-outline-success">
+                <i class="bi bi-list-ul me-1"></i>View Existing Tickets
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Form submission handling
+    const forms = document.querySelectorAll('form[method="post"]');
+    forms.forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn && !submitBtn.disabled) {
+                // Show loading state
+                const originalHTML = submitBtn.innerHTML;
+                submitBtn.innerHTML = '<div class="spinner-border spinner-border-sm me-2" role="status"></div>Processing...';
+                submitBtn.disabled = true;
+
+                // Show progress message
+                const progressDiv = document.createElement('div');
+                progressDiv.className = 'alert alert-info mt-3';
+                progressDiv.innerHTML = `
+                    <div class="d-flex align-items-center">
+                        <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                        <span>Processing MongoDB data... This may take a few minutes.</span>
+                    </div>
+                `;
+                form.appendChild(progressDiv);
+
+                // Re-enable form after timeout (fallback)
+                setTimeout(function() {
+                    submitBtn.innerHTML = originalHTML;
+                    submitBtn.disabled = false;
+                    if (document.body.contains(progressDiv)) {
+                        form.removeChild(progressDiv);
+                    }
+                }, 60000); // 1 minute timeout
+            }
+        });
+    });
+
+    // Real-time data count updates (optional)
+    function updateDataCounts() {
+        fetch('/tg/api/data-status/')
+            .then(response => response.json())
+            .then(data => {
+                if (data.mongodb) {
+                    // Update counts if different
+                    console.log('MongoDB data status:', data.mongodb);
+                }
+            })
+            .catch(error => {
+                console.log('Could not fetch data status:', error);
+            });
+    }
+
+    // Update counts every 30 seconds
+    setInterval(updateDataCounts, 30000);
+
+    // Add hover effects to cards
+    const cards = document.querySelectorAll('.card:not(.bg-light)');
+    cards.forEach(function(card) {
+        card.addEventListener('mouseenter', function() {
+            this.style.transform = 'translateY(-2px)';
+            this.style.boxShadow = '0 8px 25px rgba(0,0,0,0.15)';
+        });
+
+        card.addEventListener('mouseleave', function() {
+            this.style.transform = 'translateY(0)';
+            this.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+        });
+    });
+});
+</script>
+{% endblock %}
