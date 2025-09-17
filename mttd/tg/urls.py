@@ -1,20 +1,30 @@
-# tg/urls.py
 from django.urls import path
 from . import views
 
+app_name = "tg"
+
 urlpatterns = [
-    # Original dashboard view
-    path('', views.dashboard_view, name='dashboard'),
-    path('dashboard/', views.dashboard_view, name='dashboard'),
-    
-    # New page views
-    path('management/', views.management_view, name='management'),
-    path('dashboard/management/', views.management_view, name='management'),
-    path('analytics/', views.analytics_view, name='analytics'),
-    path('dashboard/analytics/', views.analytics_view, name='analytics'),
-    # API endpoints for the UI
-    path('api/tickets/', views.tickets_api_view, name='tickets_api'),
-    path('api/tickets/update/', views.ticket_update_api_view, name='ticket_update_api'),
-    path('api/tickets/bulk-update/', views.ticket_bulk_update_api_view, name='ticket_bulk_update_api'),
-    path('api/tickets/stats/', views.ticket_stats_api_view, name='ticket_stats_api'),
+    # Home redirect to dashboard
+    path("", views.tg_home_redirect, name="home_redirect"),
+
+    # Dashboard overview
+    path("dashboard/", views.dashboard_view, name="dashboard"),
+
+    # File upload functionality
+    path("upload/", views.upload_files, name="upload_files"),
+
+    # Ticket management
+    path("tickets/", views.ticket_list, name="ticket_list"),
+    path("tickets/<str:ticket_id>/", views.ticket_detail, name="ticket_detail"),
+    path("tickets/<str:ticket_id>/update/", views.update_ticket_status, name="update_ticket_status"),
+
+    # Analytics view (FIXED - was missing)
+    path("analytics/", views.analytics_view, name="analytics"),
+
+    # MongoDB ingestion
+    path("mongodb-ingestion/", views.mongodb_ingestion_view, name="mongodb_ingestion"),
+
+    # API endpoints
+    path("api/analytics/data/", views.analytics_data_api, name="analytics_data_api"),
+    path("api/data-status/", views.api_data_ingestion_status, name="api_data_status"),
 ]
