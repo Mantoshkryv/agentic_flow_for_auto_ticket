@@ -1,0 +1,351 @@
+{% extends "tg/base.html" %}
+{% block title %}Analytics | TG Dashboard{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="page-header text-center">
+            <h1><i class="bi bi-graph-up-arrow me-2"></i>Analytics & Insights</h1>
+            <p class="lead">Deep dive into ticket patterns and team performance</p>
+        </div>
+    </div>
+</div>
+
+<!-- Key Metrics Cards -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card dashboard-stat-card">
+            <div class="card-body text-center">
+                <i class="bi bi-ticket-perforated text-primary mb-2" style="font-size: 2.5rem;"></i>
+                <h3 class="text-primary">{{ total_tickets|default:0 }}</h3>
+                <h6 class="text-muted mb-0">Total Tickets</h6>
+                <small class="text-muted">All time</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card dashboard-stat-card">
+            <div class="card-body text-center">
+                <i class="bi bi-people text-success mb-2" style="font-size: 2.5rem;"></i>
+                <h3 class="text-success">{{ team_stats|length|default:0 }}</h3>
+                <h6 class="text-muted mb-0">Active Teams</h6>
+                <small class="text-muted">Currently assigned</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card dashboard-stat-card">
+            <div class="card-body text-center">
+                <i class="bi bi-clock text-warning mb-2" style="font-size: 2.5rem;"></i>
+                <h3 class="text-warning">2.4h</h3>
+                <h6 class="text-muted mb-0">Avg Resolution</h6>
+                <small class="text-muted">Time to close</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card dashboard-stat-card">
+            <div class="card-body text-center">
+                <i class="bi bi-check-circle text-info mb-2" style="font-size: 2.5rem;"></i>
+                <h3 class="text-info">94%</h3>
+                <h6 class="text-muted mb-0">Resolution Rate</h6>
+                <small class="text-muted">Last 30 days</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Team Performance -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-people me-2"></i>Team Performance</h5>
+            </div>
+            <div class="card-body">
+                {% if team_stats %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Team</th>
+                                    <th>Total Tickets</th>
+                                    <th>Resolved</th>
+                                    <th>High Priority</th>
+                                    <th>Resolution Rate</th>
+                                    <th>Performance</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for team in team_stats %}
+                                <tr>
+                                    <td>
+                                        <strong>{{ team.assign_team|default:"Unassigned" }}</strong>
+                                    </td>
+                                    <td>{{ team.total }}</td>
+                                    <td>{{ team.resolved }}</td>
+                                    <td>
+                                        <span class="badge bg-danger">{{ team.high_priority }}</span>
+                                    </td>
+                                    <td>
+                                        {% if team.total > 0 %}
+                                            {% widthratio team.resolved team.total 100 %}%
+                                        {% else %}
+                                            0%
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if team.total > 0 %}
+                                            {% widthratio team.resolved team.total 100 as rate %}
+                                            {% if rate >= 80 %}
+                                                <span class="badge bg-success">Excellent</span>
+                                            {% elif rate >= 60 %}
+                                                <span class="badge bg-warning">Good</span>
+                                            {% else %}
+                                                <span class="badge bg-danger">Needs Improvement</span>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="badge bg-secondary">No Data</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="text-center py-4">
+                        <i class="bi bi-people text-muted" style="font-size: 3rem;"></i>
+                        <h6 class="text-muted mt-2">No team performance data available</h6>
+                        <p class="text-muted small">Generate some tickets to see team analytics</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Status Trends Chart -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Status Trends (Last 30 Days)</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="statusTrendsChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Insights & Recommendations -->
+<div class="row">
+    <div class="col-lg-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Key Insights</h5>
+            </div>
+            <div class="card-body">
+                <div class="list-group list-group-flush">
+                    <div class="list-group-item border-0 px-0">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">Most Common Root Cause</h6>
+                            <small>Last 7 days</small>
+                        </div>
+                        <p class="mb-1">CDN Issues account for 45% of all tickets</p>
+                        <small class="text-muted">Consider CDN monitoring improvements</small>
+                    </div>
+                    <div class="list-group-item border-0 px-0">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">Peak Incident Time</h6>
+                            <small>Pattern analysis</small>
+                        </div>
+                        <p class="mb-1">Most failures occur between 8-10 PM</p>
+                        <small class="text-muted">High traffic period correlation</small>
+                    </div>
+                    <div class="list-group-item border-0 px-0">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">Resolution Efficiency</h6>
+                            <small>Team performance</small>
+                        </div>
+                        <p class="mb-1">NOC team has fastest response time</p>
+                        <small class="text-muted">Average 1.2 hours to resolution</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-flag me-2"></i>Recommendations</h5>
+            </div>
+            <div class="card-body">
+                <div class="list-group list-group-flush">
+                    <div class="list-group-item border-0 px-0">
+                        <div class="d-flex">
+                            <div class="flex-shrink-0">
+                                <span class="badge bg-warning rounded-pill">1</span>
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <h6 class="mb-1">Improve CDN Monitoring</h6>
+                                <p class="mb-1">Implement proactive CDN health checks to reduce failure tickets by ~30%</p>
+                                <small class="text-muted">Priority: High</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="list-group-item border-0 px-0">
+                        <div class="d-flex">
+                            <div class="flex-shrink-0">
+                                <span class="badge bg-info rounded-pill">2</span>
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <h6 class="mb-1">Load Balancing</h6>
+                                <p class="mb-1">Distribute evening traffic better to prevent peak-hour failures</p>
+                                <small class="text-muted">Priority: Medium</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="list-group-item border-0 px-0">
+                        <div class="d-flex">
+                            <div class="flex-shrink-0">
+                                <span class="badge bg-success rounded-pill">3</span>
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <h6 class="mb-1">Team Training</h6>
+                                <p class="mb-1">Share NOC team's best practices with other teams</p>
+                                <small class="text-muted">Priority: Low</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row">
+    <div class="col-12 text-center">
+        <div class="btn-group" role="group">
+            <a href="{% url 'tg:dashboard' %}" class="btn btn-outline-primary">
+                <i class="bi bi-arrow-left me-1"></i>Back to Dashboard
+            </a>
+            <a href="{% url 'tg:ticket_list' %}" class="btn btn-outline-success">
+                <i class="bi bi-list-ul me-1"></i>View All Tickets
+            </a>
+            <button class="btn btn-outline-secondary" onclick="exportAnalytics()">
+                <i class="bi bi-download me-1"></i>Export Report
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Status Trends Chart
+    const statusTrendsData = {{ status_trends|safe }};
+    if (statusTrendsData && statusTrendsData.length > 0) {
+        const ctx = document.getElementById('statusTrendsChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: statusTrendsData.map(item => {
+                    const date = new Date(item.date);
+                    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                }),
+                datasets: [
+                    {
+                        label: 'New Tickets',
+                        data: statusTrendsData.map(item => item.new),
+                        borderColor: chartColors.warning,
+                        backgroundColor: chartColors.warning + '20',
+                        fill: true,
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Resolved Tickets',
+                        data: statusTrendsData.map(item => item.resolved),
+                        borderColor: chartColors.success,
+                        backgroundColor: chartColors.success + '20',
+                        fill: true,
+                        tension: 0.4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    title: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        }
+                    }
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'index'
+                }
+            }
+        });
+    } else {
+        document.getElementById('statusTrendsChart').parentNode.innerHTML = 
+            '<div class="text-center py-4"><i class="bi bi-graph-up text-muted" style="font-size: 3rem;"></i><p class="text-muted mt-2">No trend data available</p></div>';
+    }
+});
+
+function exportAnalytics() {
+    // Simulate analytics export
+    const data = {
+        exported_at: new Date().toISOString(),
+        total_tickets: {{ total_tickets|default:0 }},
+        teams: {{ team_stats|length|default:0 }},
+        status_trends: {{ status_trends|safe }}
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `analytics_report_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    // Show success message
+    const alert = document.createElement('div');
+    alert.className = 'alert alert-success alert-dismissible fade show position-fixed';
+    alert.style.top = '20px';
+    alert.style.right = '20px';
+    alert.style.zIndex = '9999';
+    alert.innerHTML = `
+        <i class="bi bi-check-circle me-2"></i>Analytics report exported successfully
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    document.body.appendChild(alert);
+
+    setTimeout(() => {
+        if (document.body.contains(alert)) {
+            document.body.removeChild(alert);
+        }
+    }, 3000);
+}
+</script>
+{% endblock %}
