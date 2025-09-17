@@ -1,0 +1,283 @@
+{% extends "tg/base.html" %}
+{% block title %}Tickets | TG Dashboard{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="page-header text-center">
+            <h1><i class="bi bi-ticket-perforated me-2"></i>Ticket Management</h1>
+            <p class="lead">Monitor and manage all generated tickets</p>
+        </div>
+    </div>
+</div>
+
+<!-- Filters and Search -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <form method="get" class="row g-3">
+                    <div class="col-md-3">
+                        <label for="search" class="form-label">Search</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input type="text" class="form-control" id="search" name="search" 
+                                   value="{{ current_search }}" placeholder="Ticket ID, root cause, channel...">
+                        </div>
+                    </div>
+                    <div class="col-md-2">
+                        <label for="status" class="form-label">Status</label>
+                        <select class="form-select" id="status" name="status">
+                            <option value="">All Statuses</option>
+                            {% for status in status_choices %}
+                                <option value="{{ status }}" {% if status == current_status %}selected{% endif %}>
+                                    {{ status|title }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label for="priority" class="form-label">Priority</label>
+                        <select class="form-select" id="priority" name="priority">
+                            <option value="">All Priorities</option>
+                            {% for priority in priority_choices %}
+                                <option value="{{ priority }}" {% if priority == current_priority %}selected{% endif %}>
+                                    {{ priority|title }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label d-block">&nbsp;</label>
+                        <button type="submit" class="btn btn-primary me-2">
+                            <i class="bi bi-funnel me-1"></i>Filter
+                        </button>
+                        <a href="{% url 'tg:ticket_list' %}" class="btn btn-outline-secondary">
+                            <i class="bi bi-x-circle me-1"></i>Clear
+                        </a>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label d-block">&nbsp;</label>
+                        <a href="{% url 'tg:upload_files' %}" class="btn btn-success">
+                            <i class="bi bi-plus-circle me-1"></i>Upload Files
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tickets Table -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-list-ul me-2"></i>All Tickets</h5>
+                    <span class="badge bg-primary">{{ tickets|length }} tickets</span>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                {% if tickets %}
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th style="width: 120px;">Ticket ID</th>
+                                    <th style="width: 100px;">Status</th>
+                                    <th style="width: 100px;">Priority</th>
+                                    <th>Root Cause</th>
+                                    <th style="width: 120px;">Channel</th>
+                                    <th style="width: 100px;">Assigned Team</th>
+                                    <th style="width: 120px;">Created</th>
+                                    <th style="width: 120px;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for ticket in tickets %}
+                                <tr class="ticket-row" data-ticket-id="{{ ticket.ticket_id }}">
+                                    <td>
+                                        <a href="{% url 'tg:ticket_detail' ticket.ticket_id %}" 
+                                           class="text-decoration-none fw-medium">
+                                            {{ ticket.ticket_id }}
+                                        </a>
+                                    </td>
+                                    <td>
+                                        <span class="badge status-{{ ticket.status }}">
+                                            {{ ticket.status|title }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="badge priority-{{ ticket.priority }}">
+                                            {{ ticket.priority|title }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="text-truncate d-inline-block" style="max-width: 200px;" 
+                                              title="{{ ticket.root_cause|default:'N/A' }}">
+                                            {{ ticket.root_cause|default:"N/A" }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="text-muted">{{ ticket.channel|default:"—" }}</span>
+                                    </td>
+                                    <td>
+                                        {% if ticket.assign_team %}
+                                            <span class="badge bg-info">{{ ticket.assign_team }}</span>
+                                        {% else %}
+                                            <span class="text-muted">Unassigned</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <small class="text-muted">{{ ticket.created_at|date:"M d, H:i" }}</small>
+                                    </td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm" role="group">
+                                            <a href="{% url 'tg:ticket_detail' ticket.ticket_id %}" 
+                                               class="btn btn-outline-primary" title="View Details">
+                                                <i class="bi bi-eye"></i>
+                                            </a>
+                                            <a href="{% url 'tg:update_ticket_status' ticket.ticket_id %}" 
+                                               class="btn btn-outline-warning" title="Update">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="bi bi-inbox text-muted" style="font-size: 4rem;"></i>
+                        <h4 class="text-muted mt-3">No Tickets Found</h4>
+                        {% if current_search or current_status or current_priority %}
+                            <p class="text-muted">No tickets match your current filters.</p>
+                            <a href="{% url 'tg:ticket_list' %}" class="btn btn-primary">
+                                <i class="bi bi-arrow-left me-1"></i>Show All Tickets
+                            </a>
+                        {% else %}
+                            <p class="text-muted">Upload files to generate your first tickets</p>
+                            <a href="{% url 'tg:upload_files' %}" class="btn btn-primary">
+                                <i class="bi bi-cloud-upload me-1"></i>Upload Files
+                            </a>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Stats Cards -->
+{% if tickets %}
+<div class="row mt-4">
+    <div class="col-md-3 mb-3">
+        <div class="card bg-light border-0">
+            <div class="card-body text-center">
+                <i class="bi bi-exclamation-triangle text-warning" style="font-size: 2rem;"></i>
+                <h6 class="mt-2 mb-1">Open Tickets</h6>
+                <h4 class="text-warning">{{ tickets|length }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card bg-light border-0">
+            <div class="card-body text-center">
+                <i class="bi bi-fire text-danger" style="font-size: 2rem;"></i>
+                <h6 class="mt-2 mb-1">High Priority</h6>
+                <h4 class="text-danger">
+                    {{ tickets|length }}
+                </h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card bg-light border-0">
+            <div class="card-body text-center">
+                <i class="bi bi-people text-info" style="font-size: 2rem;"></i>
+                <h6 class="mt-2 mb-1">Teams Involved</h6>
+                <h4 class="text-info">
+                    {% regroup tickets by assign_team as team_list %}
+                    {{ team_list|length }}
+                </h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card bg-light border-0">
+            <div class="card-body text-center">
+                <i class="bi bi-clock text-secondary" style="font-size: 2rem;"></i>
+                <h6 class="mt-2 mb-1">Avg Response</h6>
+                <h4 class="text-secondary">< 1h</h4>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Auto-submit form on filter change
+    const statusSelect = document.getElementById('status');
+    const prioritySelect = document.getElementById('priority');
+
+    if (statusSelect) {
+        statusSelect.addEventListener('change', function() {
+            this.form.submit();
+        });
+    }
+
+    if (prioritySelect) {
+        prioritySelect.addEventListener('change', function() {
+            this.form.submit();
+        });
+    }
+
+    // Search form enhancement
+    const searchInput = document.getElementById('search');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this.form.submit();
+            }
+        });
+
+        // Clear search button
+        if (searchInput.value) {
+            const clearBtn = document.createElement('button');
+            clearBtn.type = 'button';
+            clearBtn.className = 'btn btn-outline-secondary btn-sm ms-2';
+            clearBtn.innerHTML = '<i class="bi bi-x"></i>';
+            clearBtn.onclick = function() {
+                searchInput.value = '';
+                searchInput.form.submit();
+            };
+            searchInput.parentNode.appendChild(clearBtn);
+        }
+    }
+
+    // Row click handling
+    const ticketRows = document.querySelectorAll('.ticket-row');
+    ticketRows.forEach(function(row) {
+        row.addEventListener('click', function(e) {
+            // Don't navigate if clicking on buttons
+            if (e.target.closest('.btn')) return;
+
+            const ticketId = this.dataset.ticketId;
+            if (ticketId) {
+                window.location.href = `/tg/tickets/${ticketId}/`;
+            }
+        });
+
+        // Add hover effect
+        row.style.cursor = 'pointer';
+    });
+});
+</script>
+{% endblock %}
