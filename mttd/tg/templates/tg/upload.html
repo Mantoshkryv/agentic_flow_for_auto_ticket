@@ -1,0 +1,367 @@
+{% extends "tg/base.html" %}
+{% block title %}Upload Files | TG Dashboard{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="page-header text-center">
+            <h1><i class="bi bi-cloud-upload me-2"></i>Upload Data Files</h1>
+            <p class="lead">Upload Session, KPI, and Metadata files to generate intelligent tickets</p>
+        </div>
+    </div>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-file-earmark-arrow-up me-2"></i>File Upload</h5>
+            </div>
+            <div class="card-body">
+                <!-- Upload Instructions -->
+                <div class="alert alert-info mb-4">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <strong>Upload Instructions:</strong>
+                    <ul class="mb-0 mt-2">
+                        <li>Upload 1-3 files in CSV or Excel format (.csv, .xlsx, .xls)</li>
+                        <li>Specify what type of data each file contains (Session, KPI, Metadata)</li>
+                        <li>Files will be processed and tickets will be automatically generated</li>
+                        <li>Session data is recommended for optimal ticket generation</li>
+                    </ul>
+                </div>
+
+                <form method="post" enctype="multipart/form-data" id="uploadForm">
+                    {% csrf_token %}
+
+                    <!-- File 1 (Required) -->
+                    <div class="file-upload-zone mb-4">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.file_1.id_for_label }}" class="form-label">
+                                        <i class="bi bi-file-earmark me-1"></i>{{ form.file_1.label }}
+                                    </label>
+                                    {{ form.file_1 }}
+                                    {% if form.file_1.help_text %}
+                                        <div class="form-text">{{ form.file_1.help_text }}</div>
+                                    {% endif %}
+                                    {% if form.file_1.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {% for error in form.file_1.errors %}{{ error }}{% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">{{ form.file_1_contains.label }}</label>
+                                    <div class="form-check-container">
+                                        {% for choice in form.file_1_contains %}
+                                            <div class="form-check">
+                                                {{ choice.tag }}
+                                                <label class="form-check-label" for="{{ choice.id_for_label }}">
+                                                    {{ choice.choice_label }}
+                                                </label>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                    {% if form.file_1_contains.help_text %}
+                                        <div class="form-text">{{ form.file_1_contains.help_text }}</div>
+                                    {% endif %}
+                                    {% if form.file_1_contains.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {% for error in form.file_1_contains.errors %}{{ error }}{% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- File 2 (Optional) -->
+                    <div class="file-upload-zone mb-4" style="opacity: 0.9;">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.file_2.id_for_label }}" class="form-label">
+                                        <i class="bi bi-file-earmark me-1"></i>{{ form.file_2.label }}
+                                    </label>
+                                    {{ form.file_2 }}
+                                    {% if form.file_2.help_text %}
+                                        <div class="form-text">{{ form.file_2.help_text }}</div>
+                                    {% endif %}
+                                    {% if form.file_2.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {% for error in form.file_2.errors %}{{ error }}{% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">{{ form.file_2_contains.label }}</label>
+                                    <div class="form-check-container">
+                                        {% for choice in form.file_2_contains %}
+                                            <div class="form-check">
+                                                {{ choice.tag }}
+                                                <label class="form-check-label" for="{{ choice.id_for_label }}">
+                                                    {{ choice.choice_label }}
+                                                </label>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                    {% if form.file_2_contains.help_text %}
+                                        <div class="form-text">{{ form.file_2_contains.help_text }}</div>
+                                    {% endif %}
+                                    {% if form.file_2_contains.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {% for error in form.file_2_contains.errors %}{{ error }}{% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- File 3 (Optional) -->
+                    <div class="file-upload-zone mb-4" style="opacity: 0.8;">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="{{ form.file_3.id_for_label }}" class="form-label">
+                                        <i class="bi bi-file-earmark me-1"></i>{{ form.file_3.label }}
+                                    </label>
+                                    {{ form.file_3 }}
+                                    {% if form.file_3.help_text %}
+                                        <div class="form-text">{{ form.file_3.help_text }}</div>
+                                    {% endif %}
+                                    {% if form.file_3.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {% for error in form.file_3.errors %}{{ error }}{% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">{{ form.file_3_contains.label }}</label>
+                                    <div class="form-check-container">
+                                        {% for choice in form.file_3_contains %}
+                                            <div class="form-check">
+                                                {{ choice.tag }}
+                                                <label class="form-check-label" for="{{ choice.id_for_label }}">
+                                                    {{ choice.choice_label }}
+                                                </label>
+                                            </div>
+                                        {% endfor %}
+                                    </div>
+                                    {% if form.file_3_contains.help_text %}
+                                        <div class="form-text">{{ form.file_3_contains.help_text }}</div>
+                                    {% endif %}
+                                    {% if form.file_3_contains.errors %}
+                                        <div class="invalid-feedback d-block">
+                                            {% for error in form.file_3_contains.errors %}{{ error }}{% endfor %}
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upload Summary -->
+                    {% if form.is_bound and form.is_valid %}
+                        <div class="alert alert-success mb-4">
+                            <i class="bi bi-check-circle me-2"></i>
+                            <strong>Upload Summary:</strong> {{ form.get_upload_summary }}
+                        </div>
+                    {% endif %}
+
+                    <!-- Form Errors -->
+                    {% if form.non_field_errors %}
+                        <div class="alert alert-danger mb-4">
+                            <i class="bi bi-exclamation-triangle me-2"></i>
+                            {% for error in form.non_field_errors %}
+                                {{ error }}
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+
+                    <!-- Submit Button -->
+                    <div class="text-center">
+                        <button type="submit" class="btn btn-primary btn-lg px-5" id="uploadButton">
+                            <i class="bi bi-cloud-upload me-2"></i>
+                            Upload and Process Files
+                            <div class="spinner-border spinner-border-sm ms-2 loading-spinner" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </button>
+                        <div class="mt-2">
+                            <small class="text-muted">Processing may take a few minutes depending on file size</small>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Data Type Information -->
+<div class="row mt-5">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Data Type Information</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="text-center mb-3">
+                            <i class="bi bi-play-circle text-primary" style="font-size: 3rem;"></i>
+                            <h6 class="mt-2">Session Data</h6>
+                            <p class="text-muted small">
+                                User session information including session IDs, start/end times, 
+                                video metrics, and playback status. Essential for ticket generation.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-center mb-3">
+                            <i class="bi bi-graph-up text-success" style="font-size: 3rem;"></i>
+                            <h6 class="mt-2">KPI Data</h6>
+                            <p class="text-muted small">
+                                Key Performance Indicators including streaming metrics, 
+                                failure rates, buffering ratios, and quality measurements.
+                            </p>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-center mb-3">
+                            <i class="bi bi-tags text-warning" style="font-size: 3rem;"></i>
+                            <h6 class="mt-2">Metadata</h6>
+                            <p class="text-muted small">
+                                Device information, location data, CDN details, and 
+                                advanced tags for enhanced ticket analysis and correlation.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const uploadForm = document.getElementById('uploadForm');
+    const uploadButton = document.getElementById('uploadButton');
+
+    // File input change handlers
+    const fileInputs = document.querySelectorAll('input[type="file"]');
+    fileInputs.forEach(function(input) {
+        input.addEventListener('change', function() {
+            const fileNumber = this.getAttribute('data-file-number');
+            const fileName = this.files[0] ? this.files[0].name : '';
+
+            // Update UI to show selected file
+            if (fileName) {
+                this.classList.add('is-valid');
+                // Auto-detect file type and suggest data types
+                autoDetectDataTypes(fileName, fileNumber);
+            } else {
+                this.classList.remove('is-valid');
+            }
+        });
+    });
+
+    // Form submission handler
+    uploadForm.addEventListener('submit', function(e) {
+        const file1 = document.getElementById('id_file_1').files[0];
+
+        if (!file1) {
+            e.preventDefault();
+            alert('Please select at least one file to upload.');
+            return;
+        }
+
+        // Check if File 1 data types are selected
+        const file1Types = document.querySelectorAll('input[name="file_1_contains"]:checked');
+        if (file1Types.length === 0) {
+            e.preventDefault();
+            alert('Please specify what type of data File 1 contains.');
+            return;
+        }
+
+        // Show loading state
+        showLoading(uploadButton);
+
+        // Show progress indicator
+        const progressDiv = document.createElement('div');
+        progressDiv.className = 'alert alert-info mt-3';
+        progressDiv.innerHTML = `
+            <div class="d-flex align-items-center">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                <span>Processing files... Please wait while we analyze your data and generate tickets.</span>
+            </div>
+        `;
+        uploadForm.appendChild(progressDiv);
+    });
+
+    // Auto-detect data types based on filename
+    function autoDetectDataTypes(filename, fileNumber) {
+        const lowerFilename = filename.toLowerCase();
+        const checkboxes = document.querySelectorAll(`input[name="file_${fileNumber}_contains"]`);
+
+        // Clear previous selections
+        checkboxes.forEach(cb => cb.checked = false);
+
+        // Auto-select based on filename patterns
+        if (lowerFilename.includes('session')) {
+            document.querySelector(`input[name="file_${fileNumber}_contains"][value="session"]`).checked = true;
+        }
+        if (lowerFilename.includes('kpi') || lowerFilename.includes('metric')) {
+            document.querySelector(`input[name="file_${fileNumber}_contains"][value="kpi"]`).checked = true;
+        }
+        if (lowerFilename.includes('meta') || lowerFilename.includes('tag') || lowerFilename.includes('device')) {
+            document.querySelector(`input[name="file_${fileNumber}_contains"][value="metadata"]`).checked = true;
+        }
+
+        // If no patterns matched, suggest session data for primary file
+        if (fileNumber === '1' && !document.querySelector(`input[name="file_${fileNumber}_contains"]:checked`)) {
+            document.querySelector(`input[name="file_${fileNumber}_contains"][value="session"]`).checked = true;
+        }
+    }
+
+    // Drag and drop functionality
+    const fileZones = document.querySelectorAll('.file-upload-zone');
+    fileZones.forEach(function(zone) {
+        const fileInput = zone.querySelector('input[type="file"]');
+
+        zone.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            zone.style.borderColor = 'var(--primary-color)';
+            zone.style.background = 'linear-gradient(135deg, #e3f2fd 0%, #f8f9fa 100%)';
+        });
+
+        zone.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            zone.style.borderColor = '#dee2e6';
+            zone.style.background = 'linear-gradient(135deg, #fff 0%, #f8f9fa 100%)';
+        });
+
+        zone.addEventListener('drop', function(e) {
+            e.preventDefault();
+            zone.style.borderColor = '#dee2e6';
+            zone.style.background = 'linear-gradient(135deg, #fff 0%, #f8f9fa 100%)';
+
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                fileInput.files = files;
+                fileInput.dispatchEvent(new Event('change'));
+            }
+        });
+    });
+});
+</script>
+{% endblock %}
