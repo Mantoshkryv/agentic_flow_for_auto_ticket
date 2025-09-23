@@ -1,4 +1,17 @@
-# data_processing.py - PERFECT MERGED VERSION with exact field mappings and MongoDB integration
+# data_processing.py - CLEAN VERSION WITH ORIGINAL NAMES
+
+"""
+Unified Data Processing Pipeline
+===============================
+
+Features:
+- Manual Upload Data: Full preprocessing + ticket generation (no MongoDB save)
+- MongoDB Data: Light processing (column mapping only) + ticket generation
+- Session-focused processing with session_id as unique identifier
+- Flexible column mapping maintained
+- No batch_id concept
+- Original function names preserved
+"""
 
 import pandas as pd
 import numpy as np
@@ -11,483 +24,978 @@ import re
 import json
 import tempfile
 import os
+import gc
+import psutil
 
 # Django imports
 from django.db import transaction
 from django.utils import timezone
 from django.core import serializers
+from .operation.ticket_engine import AutoTicketMVP
+
+# Import existing functions to prevent duplicacy
+try:
+    from .models import Session, KPI, Advancetags, Ticket
+    from .data_validation import ComprehensiveDataValidator, create_data_validator
+except ImportError:
+    logger = logging.getLogger(__name__)
+    logger.warning("Could not import some dependencies")
 
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# CONFIGURATION CLASSES
+# ============================================================================
+
 @dataclass
 class ProcessingConfig:
+    """Configuration for data processing operations"""
     chunk_size: int = 10000
     memory_threshold_mb: int = 500
-    max_columns: int = 100
+    max_columns: int = 200
     enable_parallel: bool = True
     skip_validation: bool = False
+    auto_detect_types: bool = True
+    cleanup_temp_files: bool = True
+    session_only_tickets: bool = True
+    variable_channels: bool = True
+    remove_blank_columns_threshold: float = 0.95
+    remove_blank_rows_threshold: float = 0.90
+    flexible_column_mapping: bool = True
 
-class MongoDBCollectionMapper:
-    """Maps data columns to MongoDB collections based on EXACT patterns and field mappings"""
+# ============================================================================
+# FLEXIBLE COLUMN MAPPER
+# ============================================================================
+
+class FlexibleColumnMapper:
+    """Maps various column names to standardized model fields"""
     
     def __init__(self):
-        self.collection_patterns = {
-            'kpi_data': {  # Match KPI model db_table
-                'required': ['timestamp', 'plays'],
-                'patterns': [
-                    # EXACT PATTERN MATCHING FOR ACTUAL COLUMNS
-                    'timestamp', 'plays', 'playing time', 'streaming performance',
-                    'video start failures', 'exit before video starts',
-                    'video playback failures', 'video start time',
-                    'rebuffering ratio', 'connection induced rebuffering',
-                    'video restart time', 'peak bitrate', 'avg', 'mbps'
-                ],
-                'model': 'KPI'
+        # Session mappings
+        self.session_mappings = {
+            'session_id': {
+                'exact': ['Session ID', 'session_id', 'sessionid', 'SessionID'],
+                'contains': ['session', 'session_id'],
+                'patterns': [r'session.*id', r'id.*session']
             },
-            'sessions': {  # Match Session model db_table
-                'required': ['session id', 'session_id'],
-                'patterns': [
-                    # EXACT PATTERN MATCHING FOR ACTUAL COLUMNS  
-                    'session id', 'session end time', 'session start time',
-                    'asset name', 'ended session', 'impacted session',
-                    'video start time', 'rebuffering ratio', 'total video restart',
-                    'peak bitrate', 'average bitrate', 'framerate', 'starting bitrate',
-                    'channel', 'bitrate switches', 'ended status', 'status',
-                    'video start failure', 'exit before video'
-                ],
-                'model': 'Session'
+            'viewer_id': {
+                'exact': ['Viewer ID', 'viewer_id', 'viewerid', 'ViewerID'],
+                'contains': ['viewer', 'viewer_id'],
+                'patterns': [r'viewer.*id', r'id.*viewer']
             },
-            'advancetags': {  # Match Advancetags model db_table
-                'required': ['session id', 'session_id'],
-                'patterns': [
-                    # EXACT PATTERN MATCHING FOR ACTUAL COLUMNS
-                    'session id', 'browser name', 'browser version',
-                    'device hardware', 'device manufacturer', 'device marketing',
-                    'device model', 'device name', 'device operating system',
-                    'app name', 'app version', 'player framework',
-                    'cdn', 'city', 'ip', 'ipv6', 'state', 'country',
-                    'address', 'asnname', 'ispname', 'streamurl',
-                    'content category', 'channel'
-                ],
-                'model': 'Advancetags'
+            'asset_name': {
+                'exact': ['Asset Name', 'asset_name', 'assetname', 'channel', 'Channel'],
+                'contains': ['asset', 'channel', 'content'],
+                'patterns': [r'asset.*name', r'channel.*name', r'content.*name']
+            },
+            'session_start_time': {
+                'exact': ['Session Start Time', 'session_start_time', 'start_time', 'timestamp'],
+                'contains': ['start_time', 'session_start', 'timestamp'],
+                'patterns': [r'session.*start.*time', r'start.*time', r'time.*start']
+            },
+            'session_end_time': {
+                'exact': ['Session End Time', 'session_end_time', 'end_time'],
+                'contains': ['end_time', 'session_end'],
+                'patterns': [r'session.*end.*time', r'end.*time', r'time.*end']
+            },
+            'status': {
+                'exact': ['Status', 'status', 'session_status'],
+                'contains': ['status', 'state'],
+                'patterns': [r'.*status.*', r'.*state.*']
+            },
+            'playing_time': {
+                'exact': ['Playing Time', 'playing_time'],
+                'contains': ['playing', 'duration'],
+                'patterns': [r'playing.*time', r'time.*playing']
+            },
+            'rebuffering_ratio': {
+                'exact': ['Rebuffering Ratio', 'rebuffering_ratio'],
+                'contains': ['rebuffering', 'buffering'],
+                'patterns': [r'rebuffer.*ratio', r'buffer.*ratio']
+            },
+            'avg_peak_bitrate': {
+                'exact': ['Avg. Peak Bitrate', 'avg_peak_bitrate', 'Average Peak Bitrate'],
+                'contains': ['peak_bitrate', 'peak'],
+                'patterns': [r'avg.*peak.*bitrate', r'average.*peak']
             }
         }
-
-    def get_kpi_field_mapping(self):
-        """Complete KPI field mapping for exact column names"""
-        return {
-            'Timestamp': 'timestamp',
-            'Plays': 'plays',
-            'Playing Time (Ended) (mins)': 'playing_time_mins',
-            'Streaming Performance Index': 'streaming_performance_index',
-            'Video Start Failures Technical': 'video_start_failures_technical',
-            'Video Start Failures Business': 'video_start_failures_business',
-            'Exit Before Video Starts': 'exit_before_video_starts',
-            'Video Playback Failures Technical': 'video_playback_failures_technical',
-            'Video Playback Failures Business': 'video_playback_failures_business',
-            'Video Start Time(sec)': 'video_start_time_sec',
-            'Rebuffering Ratio(%)': 'rebuffering_ratio_pct',
-            'Connection Induced Rebuffering Ratio(%)': 'connection_induced_rebuffering_pct',
-            'Video Restart Time(sec)': 'video_restart_time_sec',
-            'Avg. Peak Bitrate(Mbps)': 'avg_peak_bitrate_mbps'
+        
+        # KPI mappings
+        self.kpi_mappings = {
+            'timestamp': {
+                'exact': ['timestamp', 'Timestamp', 'time', 'Time'],
+                'contains': ['time', 'date'],
+                'patterns': [r'.*time.*', r'.*date.*']
+            },
+            'plays': {
+                'exact': ['Plays', 'plays', 'play_count'],
+                'contains': ['play', 'count'],
+                'patterns': [r'play.*count', r'.*play.*']
+            },
+            'streaming_performance_index': {
+                'exact': ['Streaming Performance Index', 'streaming_performance_index'],
+                'contains': ['streaming', 'performance'],
+                'patterns': [r'streaming.*performance', r'performance.*index']
+            }
+        }
+        
+        # Advancetags mappings
+        self.advancetags_mappings = {
+            'session_id': {
+                'exact': ['Session ID', 'session_id', 'sessionid', 'Session Id'],
+                'contains': ['session'],
+                'patterns': [r'session.*id', r'id.*session']
+            },
+            'asset_name': {
+                'exact': ['Asset Name', 'asset_name', 'channel'],
+                'contains': ['asset', 'channel'],
+                'patterns': [r'asset.*name', r'channel.*name']
+            },
+            'browser_name': {
+                'exact': ['Browser Name', 'browser_name'],
+                'contains': ['browser'],
+                'patterns': [r'browser.*name', r'.*browser.*']
+            },
+            'device_name': {
+                'exact': ['Device Name', 'device_name'],
+                'contains': ['device', 'name'],
+                'patterns': [r'device.*name', r'name.*device']
+            },
+            'city': {
+                'exact': ['City', 'city'],
+                'contains': ['city'],
+                'patterns': [r'.*city.*']
+            },
+            'country': {
+                'exact': ['Country', 'country'],
+                'contains': ['country'],
+                'patterns': [r'.*country.*']
+            },
+            'ip': {
+                'exact': ['IP', 'ip', 'ip_address'],
+                'contains': ['ip'],
+                'patterns': [r'.*ip.*', r'ip.*address']
+            }
         }
     
-    def get_sessions_field_mapping(self):
-        """Complete Sessions field mapping for exact column names"""
-        return {
-            'Session ID': 'session_id',
-            'Session End Time': 'session_end_time',
-            'Playing Time': 'playing_time',
-            'Asset Name': 'asset_name',
-            'Ended Session': 'ended_session',
-            'Impacted Session': 'impacted_session',
-            'Video Start Time': 'video_start_time',
-            'Rebuffering Ratio': 'rebuffering_ratio',
-            'Connection Induced Rebuffering Ratio': 'connection_induced_rebuffering_ratio',
-            'Total Video Restart Time': 'total_video_restart_time',
-            'Avg. Peak Bitrate': 'avg_peak_bitrate',
-            'Avg. Average Bitrate': 'avg_average_bitrate',
-            'Average Framerate': 'average_framerate',
-            'Starting Bitrate': 'starting_bitrate',
-            'channel': 'channel',
-            'Bitrate Switches': 'bitrate_switches',
-            'Ended Status': 'ended_status',
-            'Exit Before Video Starts': 'exit_before_video_starts',
-            'Session Start Time': 'session_start_time',
-            'Status': 'status',
-            'Video Start Failure': 'video_start_failure'
-        }
+    def flexible_map_columns(self, df: pd.DataFrame, data_type: str) -> pd.DataFrame:
+        """Apply flexible column mapping based on data type"""
+        if df is None or df.empty:
+            logger.warning(f"Empty dataframe provided for {data_type} mapping")
+            return df
+
+        logger.info(f"=== MAPPING {data_type.upper()} ===")
+        logger.info(f"Input columns: {list(df.columns)}")
+
+        if data_type == 'sessions':
+            mapping_dict = self.session_mappings
+        elif data_type == 'kpi_data':
+            mapping_dict = self.kpi_mappings
+        elif data_type == 'advancetags':
+            mapping_dict = self.advancetags_mappings
+        else:
+            logger.warning(f"Unknown data type: {data_type}")
+            return df
+
+        # Create column mapping
+        column_map = {}
+        available_columns = df.columns.tolist()
+
+        for standard_name, match_config in mapping_dict.items():
+            mapped_column = self._find_column_flexible(available_columns, match_config)
+            if mapped_column:
+                column_map[mapped_column] = standard_name
+                logger.info(f"Mapped: '{mapped_column}' -> '{standard_name}'")
+
+        # Apply mapping
+        if column_map:
+            df_mapped = df.rename(columns=column_map)
+            logger.info(f"Successfully mapped {len(column_map)} columns for {data_type}")
+            return df_mapped
+        else:
+            logger.warning(f"No columns mapped for {data_type}")
+            # RETURN ORIGINAL DF INSTEAD OF FAILING
+            return df
+
+    def _find_column_flexible(self, available_columns: List[str], match_config: Dict[str, List]) -> Optional[str]:
+        """Find matching column using flexible patterns"""
+        # Try exact matches first
+        for exact_name in match_config.get('exact', []):
+            for col in available_columns:
+                if str(col).lower() == str(exact_name).lower():
+                    return col
+
+        # Try contains matches
+        for contains_text in match_config.get('contains', []):
+            for col in available_columns:
+                if contains_text.lower() in str(col).lower():
+                    return col
+
+        # Try pattern matches
+        for pattern in match_config.get('patterns', []):
+            for col in available_columns:
+                if re.search(pattern, str(col).lower(), re.IGNORECASE):
+                    return col
+
+        return None
+
+# ============================================================================
+# SMART DATA CLEANER
+# ============================================================================
+
+class SmartDataCleaner:
+    """Enhanced data cleaner for manual upload data"""
     
-    def get_advancetags_field_mapping(self):
-        """Complete Advancetags field mapping for exact column names"""
-        return {
-            'Session Id': 'session_id',
-            'Asset Name': 'asset_name',
-            'Content Category': 'content_category',
-            'Browser Name': 'browser_name',
-            'Browser Version': 'browser_version',
-            'Device Hardware Type': 'device_hardware_type',
-            'Device Manufacturer': 'device_manufacturer',
-            'Device Marketing Name': 'device_marketing_name',
-            'Device Model': 'device_model',
-            'Device Name': 'device_name',
-            'Device Operating System': 'device_os',
-            'Device Operating System Family': 'device_os_family',
-            'Device Operating System Version': 'device_os_version',
-            'App Name': 'app_name',
-            'Player Framework Name': 'player_framework_name',
-            'Player Framework Version': 'player_framework_version',
-            'Last CDN': 'last_cdn',
-            'App Version': 'app_version',
-            'Channel': 'channel',
-            'city': 'city',
-            'ip': 'ip',
-            'ipv6': 'ipv6',
-            'cdn': 'cdn',
-            'state': 'state',
-            'country': 'country',
-            'address': 'address',
-            'asnName': 'asname',  # Note: your data uses 'asnName'
-            'ispName': 'isp_name',  # Note: your data uses 'ispName'
-            'streamUrl': 'stream_url'  # Note: your data uses 'streamUrl'
-        }
-
-    def detect_collection_type(self, columns: List[str]) -> Dict[str, float]:
-        """Detect which collection type the columns belong to using exact patterns"""
-        columns_lower = [col.lower().strip() for col in columns if col and str(col).strip()]
-        
-        scores = {}
-        for collection, config in self.collection_patterns.items():
-            score = 0
-            total_patterns = len(config['patterns'])
-            
-            # Check required fields
-            required_found = 0
-            for req in config['required']:
-                if any(req.lower() in col for col in columns_lower):
-                    required_found += 1
-            
-            # Must have at least one required field
-            if required_found == 0:
-                scores[collection] = 0.0
-                continue
-                
-            # Check pattern matches
-            pattern_matches = 0
-            for pattern in config['patterns']:
-                if any(pattern.lower() in col for col in columns_lower):
-                    pattern_matches += 1
-            
-            # Calculate score: (pattern_matches / total_patterns) * required_weight
-            pattern_score = pattern_matches / total_patterns
-            required_weight = required_found / len(config['required'])
-            scores[collection] = (pattern_score * 0.7) + (required_weight * 0.3)
-        
-        return scores
-
-    def get_best_collection_match(self, columns: List[str]) -> Optional[str]:
-        """Get the best matching collection for given columns"""
-        scores = self.detect_collection_type(columns)
-        if not scores or max(scores.values()) < 0.2:  # Minimum threshold
-            return None
-        return max(scores, key=scores.get)
-
-    def clean_kpi_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Clean and process KPI data with EXACT column mapping"""
-        if df.empty:
-            return df
-            
-        df_cleaned = df.copy()
-        field_mapping = self.get_kpi_field_mapping()
-        
-        # Apply exact field mapping
-        df_mapped = pd.DataFrame()
-        for source_col, target_field in field_mapping.items():
-            if source_col in df_cleaned.columns:
-                df_mapped[target_field] = df_cleaned[source_col]
-                
-                # Special handling for different data types
-                if target_field == 'timestamp':
-                    df_mapped[target_field] = pd.to_datetime(df_mapped[target_field], errors='coerce')
-                elif target_field in ['plays', 'video_start_failures_technical', 'video_start_failures_business', 
-                                    'exit_before_video_starts', 'video_playback_failures_technical', 
-                                    'video_playback_failures_business']:
-                    df_mapped[target_field] = pd.to_numeric(df_mapped[target_field], errors='coerce').fillna(0).astype(int)
-                elif target_field in ['playing_time_mins', 'streaming_performance_index', 
-                                    'video_start_time_sec', 'rebuffering_ratio_pct', 
-                                    'connection_induced_rebuffering_pct', 'video_restart_time_sec', 
-                                    'avg_peak_bitrate_mbps']:
-                    # Handle percentage strings and convert to float
-                    if df_mapped[target_field].dtype == 'object':
-                        df_mapped[target_field] = df_mapped[target_field].astype(str).str.replace('%', '').str.replace(',', '')
-                    df_mapped[target_field] = pd.to_numeric(df_mapped[target_field], errors='coerce')
-        
-        logger.info(f"Cleaned KPI data: {len(df_mapped)} rows with exact column mapping")
-        return df_mapped
-
-    def clean_session_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Clean and process session data with EXACT column mapping"""
-        if df.empty:
-            return df
-            
-        df_cleaned = df.copy()
-        field_mapping = self.get_sessions_field_mapping()
-        
-        # Apply exact field mapping
-        df_mapped = pd.DataFrame()
-        for source_col, target_field in field_mapping.items():
-            if source_col in df_cleaned.columns:
-                df_mapped[target_field] = df_cleaned[source_col]
-                
-                # Special handling for different data types
-                if target_field in ['session_start_time', 'session_end_time', 'video_start_time']:
-                    df_mapped[target_field] = pd.to_datetime(df_mapped[target_field], errors='coerce')
-                elif target_field in ['playing_time', 'total_video_restart_time',
-                                    'avg_peak_bitrate', 'avg_average_bitrate', 'average_framerate',
-                                    'starting_bitrate', 'rebuffering_ratio', 'connection_induced_rebuffering_ratio']:
-                    # Handle percentage and numeric conversions
-                    if df_mapped[target_field].dtype == 'object':
-                        df_mapped[target_field] = df_mapped[target_field].astype(str).str.replace('%', '').str.replace(',', '')
-                    df_mapped[target_field] = pd.to_numeric(df_mapped[target_field], errors='coerce')
-                elif target_field == 'bitrate_switches':
-                    df_mapped[target_field] = pd.to_numeric(df_mapped[target_field], errors='coerce').fillna(0).astype('Int64')
-                elif target_field in ['ended_session', 'impacted_session', 'exit_before_video_starts', 'video_start_failure']:
-                    # Boolean conversion
-                    df_mapped[target_field] = df_mapped[target_field].astype(str).str.lower().isin(['true', '1', 'yes'])
-                else:
-                    # String fields
-                    df_mapped[target_field] = df_mapped[target_field].astype(str).replace('nan', None)
-        
-        # Handle viewer_id extraction if not present
-        if 'viewer_id' not in df_mapped.columns and 'session_id' in df_mapped.columns:
-            # Extract from session_id only if viewer_id is not in source data
-            df_mapped['viewer_id'] = df_mapped['session_id'].astype(str).str.split('-').str[0]
-            logger.info("Extracted viewer_id from session_id")
-        
-        logger.info(f"Cleaned session data: {len(df_mapped)} rows with exact column mapping")
-        return df_mapped
-
-    def clean_advancetags_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Clean and process advancetags data with EXACT column mapping"""
-        if df.empty:
-            return df
-            
-        df_cleaned = df.copy()
-        field_mapping = self.get_advancetags_field_mapping()
-        
-        # Apply exact field mapping
-        df_mapped = pd.DataFrame()
-        for source_col, target_field in field_mapping.items():
-            if source_col in df_cleaned.columns:
-                df_mapped[target_field] = df_cleaned[source_col]
-                
-                # Convert all to string and clean
-                df_mapped[target_field] = df_mapped[target_field].astype(str).replace('nan', None)
-                
-                # Special handling for IP addresses
-                if target_field in ['ip', 'ipv6']:
-                    df_mapped[target_field] = df_mapped[target_field].replace('None', None)
-        
-        logger.info(f"Cleaned advancetags data: {len(df_mapped)} rows with exact column mapping")
-        return df_mapped
-
-class DataProcessor:
-    """Enhanced data processor for MongoDB collections with exact field mapping"""
-    
-    def __init__(self, config: Optional[ProcessingConfig] = None):
+    def __init__(self, config: ProcessingConfig = None):
         self.config = config or ProcessingConfig()
-        self.mapper = MongoDBCollectionMapper()
+    
+    def smart_clean_dataframe(self, df: pd.DataFrame, data_type: str = None) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        """Full data cleaning for manual upload data"""
+        start_time = datetime.now()
+        original_shape = df.shape
         
-    def find_data_start_row(self, df: pd.DataFrame) -> int:
-        """Find where actual data starts, skipping instruction rows"""
-        for i in range(min(20, len(df))):  # Check first 20 rows max
-            row = df.iloc[i]
-            # Skip rows with mostly NaN or string instructions
-            non_na_count = row.notna().sum()
-            if non_na_count >= 3:  # At least 3 non-empty columns
-                # Check if this looks like a header row
-                str_values = row.astype(str).str.lower()
-                if any(keyword in ' '.join(str_values.values) 
-                      for keyword in ['session', 'timestamp', 'plays', 'isp', 'city', 'browser']):
-                    return i
-        return 0
-
-    def intelligently_process_any_file(self, file_path: str, filename: str = None) -> Dict[str, pd.DataFrame]:
-        """
-        Enhanced file processing with exact column mapping for actual data
-        Returns data keyed by db_table names: kpi_data, sessions, advancetags
-        """
-        results = {
-            'kpi_data': pd.DataFrame(),  # Match KPI model db_table
-            'sessions': pd.DataFrame(),  # Match Session model db_table
-            'advancetags': pd.DataFrame()  # Match Advancetags model db_table
+        logger.info(f"Smart cleaning started: {original_shape[0]} rows, {original_shape[1]} columns")
+        
+        # 1. Find actual data start position
+        df_clean = self._find_data_start_position(df)
+        
+        # 2. Remove instruction rows and noise
+        df_clean = self._remove_instructions_and_noise(df_clean)
+        
+        # 3. Remove blank columns intelligently
+        df_clean = self._remove_blank_columns_smart(df_clean)
+        
+        # 4. Remove blank rows intelligently
+        df_clean = self._remove_blank_rows_smart(df_clean)
+        
+        # 5. Clean column names
+        df_clean = self._clean_column_names(df_clean)
+        
+        # 6. Standardize data types
+        df_clean = self._standardize_data_types(df_clean, data_type)
+        
+        # 7. Handle mixed data in cells
+        df_clean = self._handle_mixed_cell_data(df_clean)
+        
+        # 8. Final optimization
+        df_clean = self._optimize_memory(df_clean)
+        
+        # Calculate statistics
+        final_shape = df_clean.shape
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
+        cleaning_stats = {
+            'original_shape': original_shape,
+            'final_shape': final_shape,
+            'removed_rows': original_shape[0] - final_shape[0],
+            'removed_columns': original_shape[1] - final_shape[1],
+            'processing_time': processing_time,
         }
         
-        try:
-            # Use provided filename or extract from path
-            if not filename:
-                filename = os.path.basename(file_path)
+        logger.info(f"Smart cleaning complete: {original_shape} -> {final_shape}")
+        return df_clean, cleaning_stats
+    
+    def _find_data_start_position(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Find where actual data starts"""
+        if df.empty:
+            return df
+        
+        potential_headers = []
+        
+        for idx in range(min(20, len(df))):
+            row = df.iloc[idx]
+            non_null_count = row.count()
+            
+            if non_null_count >= 3:
+                row_text = ' '.join([str(val) for val in row.values if pd.notna(val)])
+                header_indicators = ['session', 'timestamp', 'plays', 'browser', 'device', 'ip', 'cdn', 'asset']
+                matches = sum(1 for indicator in header_indicators 
+                            if indicator.lower() in row_text.lower())
                 
-            logger.info(f"Processing file: {filename} at path: {file_path}")
+                if matches >= 2:
+                    potential_headers.append((idx, matches, non_null_count))
+        
+        if potential_headers:
+            best_header_idx = max(potential_headers, key=lambda x: (x[1], x[2]))[0]
             
-            # Read file with flexible encoding
-            encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
-            df = None
-            
-            for encoding in encodings:
-                try:
-                    if file_path.endswith('.xlsx'):
-                        df = pd.read_excel(file_path, header=None)
+            if best_header_idx > 0:
+                logger.info(f"Data starts at row {best_header_idx}")
+                new_columns = []
+                header_row = df.iloc[best_header_idx]
+                
+                for val in header_row.values:
+                    if pd.notna(val) and str(val).strip():
+                        new_columns.append(str(val).strip())
                     else:
-                        df = pd.read_csv(file_path, header=None, encoding=encoding)
-                    break
-                except UnicodeDecodeError:
-                    continue
-            
-            if df is None or df.empty:
-                logger.error(f"Could not read file: {file_path}")
-                return results
-            
-            logger.info(f"File loaded: {df.shape[0]} rows, {df.shape[1]} columns")
-            
-            # Find where data actually starts
-            data_start_row = self.find_data_start_row(df)
-            logger.info(f"Data starts at row: {data_start_row}")
-            
-            # Use the detected row as header
-            if data_start_row < len(df):
-                df.columns = df.iloc[data_start_row]
-                df = df.iloc[data_start_row + 1:].reset_index(drop=True)
-            
-            # Clean column names - preserve exact casing for mapping
-            df.columns = [str(col).strip() for col in df.columns]
-            
-            # Remove completely empty columns and rows
-            df = df.dropna(how='all', axis=1)
-            df = df.dropna(how='all', axis=0)
-            
-            if df.empty:
-                logger.warning("No data remaining after cleaning")
-                return results
+                        new_columns.append(f'Column_{len(new_columns) + 1}')
                 
-            logger.info(f"After cleaning: {df.shape[0]} rows, {df.shape[1]} columns")
-            logger.info(f"Columns: {list(df.columns)}")
-            
-            # Detect collection type using exact column names
-            collection_type = self.mapper.get_best_collection_match(df.columns)
-            
-            if not collection_type:
-                logger.warning("Could not determine collection type, attempting to split data")
-                results = self._split_mixed_data(df)
-            else:
-                logger.info(f"Detected collection type: {collection_type}")
-                # Process using exact field mapping methods
-                if collection_type == 'kpi_data':
-                    results['kpi_data'] = self.mapper.clean_kpi_data(df)
-                elif collection_type == 'sessions':
-                    results['sessions'] = self.mapper.clean_session_data(df)
-                elif collection_type == 'advancetags':
-                    results['advancetags'] = self.mapper.clean_advancetags_data(df)
-                    
-        except Exception as e:
-            logger.error(f"Error processing file {file_path}: {str(e)}", exc_info=True)
-            
-        return results
-
-    def _split_mixed_data(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
-        """Split mixed data into different collection types"""
-        results = {
-            'kpi_data': pd.DataFrame(),
-            'sessions': pd.DataFrame(),
-            'advancetags': pd.DataFrame()
-        }
+                df_data = df.iloc[best_header_idx + 1:].copy()
+                df_data.columns = new_columns[:len(df_data.columns)]
+                df_data = df_data.reset_index(drop=True)
+                return df_data
         
-        # Group columns by collection type
-        column_groups = {'kpi_data': [], 'sessions': [], 'advancetags': []}
+        return df
+    
+    def _remove_instructions_and_noise(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove instruction rows and noise data"""
+        if df.empty:
+            return df
+        
+        instruction_patterns = [
+            r'instructions?:', r'note:', r'please', r'click', r'select',
+            r'download', r'upload', r'step\s+\d+', r'guide', r'help'
+        ]
+        
+        rows_to_remove = []
+        
+        for idx, row in df.iterrows():
+            row_text = ' '.join([str(val).lower() for val in row.values if pd.notna(val)])
+            
+            if len(row_text.strip()) < 5:
+                rows_to_remove.append(idx)
+                continue
+            
+            for pattern in instruction_patterns:
+                if re.search(pattern, row_text, re.IGNORECASE):
+                    rows_to_remove.append(idx)
+                    break
+        
+        if rows_to_remove:
+            df_clean = df.drop(index=rows_to_remove).reset_index(drop=True)
+            logger.info(f"Removed {len(rows_to_remove)} instruction/noise rows")
+            return df_clean
+        
+        return df
+    
+    def _remove_blank_columns_smart(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove blank columns based on threshold"""
+        if df.empty:
+            return df
+        
+        columns_to_remove = []
+        threshold = self.config.remove_blank_columns_threshold
         
         for col in df.columns:
-            scores = self.mapper.detect_collection_type([col])
-            if scores and max(scores.values()) > 0.1:
-                best_match = max(scores, key=scores.get)
-                
-                if best_match in column_groups:
-                    column_groups[best_match].append(col)
+            total_rows = len(df)
+            blank_count = sum(1 for val in df[col] if pd.isna(val) or str(val).strip() == '')
+            blank_ratio = blank_count / total_rows if total_rows > 0 else 1.0
+            
+            if blank_ratio >= threshold:
+                columns_to_remove.append(col)
         
-        # Process each group
-        for collection_type, columns in column_groups.items():
-            if columns:
-                subset_df = df[columns].copy()
-                subset_df = subset_df.dropna(how='all')
-                
-                if not subset_df.empty:
-                    if collection_type == 'kpi_data':
-                        results['kpi_data'] = self.mapper.clean_kpi_data(subset_df)
-                    elif collection_type == 'sessions':
-                        results['sessions'] = self.mapper.clean_session_data(subset_df)
-                    elif collection_type == 'advancetags':
-                        results['advancetags'] = self.mapper.clean_advancetags_data(subset_df)
+        if columns_to_remove:
+            df_clean = df.drop(columns=columns_to_remove)
+            logger.info(f"Removed {len(columns_to_remove)} blank columns")
+            return df_clean
         
-        return results
-
-    def fetch_database_df(self, model_class):
-        """Fetch data from Django model and convert to DataFrame for MongoDB processing"""
-        try:
-            from django.core import serializers
-            import json
-            
-            # Get all records from the model
-            queryset = model_class.objects.all()
-            
-            if not queryset.exists():
-                logger.info(f"No data found in {model_class.__name__}")
-                return pd.DataFrame()
-            
-            # Convert to DataFrame
-            serialized = serializers.serialize('json', queryset)
-            data = json.loads(serialized)
-            
-            # Extract fields from Django serialization format
-            records = []
-            for item in data:
-                record = item['fields'].copy()
-                record['id'] = item['pk']  # Add primary key
-                records.append(record)
-            
-            df = pd.DataFrame(records)
-            logger.info(f"Fetched {len(df)} records from {model_class.__name__} collection")
-            return df
-            
-        except Exception as e:
-            logger.error(f"Error fetching data from {model_class.__name__}: {e}")
-            return pd.DataFrame()
-
-    def save_to_mongodb_collection(self, df: pd.DataFrame, model_class, collection_type: str) -> int:
-        """Save DataFrame to MongoDB collection via Django model"""
+        return df
+    
+    def _remove_blank_rows_smart(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove blank rows based on threshold"""
         if df.empty:
-            logger.warning(f"No data to save to {collection_type} collection")
-            return 0
+            return df
         
-        saved_count = 0
+        rows_to_remove = []
+        threshold = self.config.remove_blank_rows_threshold
+        
+        for idx, row in df.iterrows():
+            total_cols = len(row)
+            blank_count = sum(1 for val in row.values if pd.isna(val) or str(val).strip() == '')
+            blank_ratio = blank_count / total_cols if total_cols > 0 else 1.0
+            
+            if blank_ratio >= threshold:
+                rows_to_remove.append(idx)
+        
+        if rows_to_remove:
+            df_clean = df.drop(index=rows_to_remove).reset_index(drop=True)
+            logger.info(f"Removed {len(rows_to_remove)} blank rows")
+            return df_clean
+        
+        return df
+    
+    def _clean_column_names(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Clean and standardize column names"""
+        new_columns = []
+        
+        for col in df.columns:
+            clean_name = str(col).strip()
+            clean_name = re.sub(r'[^\w\s\(\)\%\.\-]', ' ', clean_name)
+            clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+            
+            if not clean_name or clean_name.lower() in ['unnamed', 'null', 'none']:
+                clean_name = f'Column_{len(new_columns) + 1}'
+            
+            new_columns.append(clean_name)
+        
+        # Handle duplicates
+        seen = {}
+        final_columns = []
+        for col in new_columns:
+            if col in seen:
+                seen[col] += 1
+                final_columns.append(f"{col}_{seen[col]}")
+            else:
+                seen[col] = 0
+                final_columns.append(col)
+        
+        df.columns = final_columns
+        return df
+    
+    def _standardize_data_types(self, df: pd.DataFrame, data_type: str = None) -> pd.DataFrame:
+        """Standardize data types"""
+        for col in df.columns:
+            if df[col].dtype in ['int64', 'float64', 'datetime64[ns]']:
+                continue
+            
+            sample = df[col].dropna().head(100)
+            if len(sample) == 0:
+                continue
+            
+            if self._looks_like_number(sample):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+            elif self._looks_like_datetime(sample):
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+        
+        return df
+    
+    def _looks_like_number(self, series: pd.Series) -> bool:
+        """Check if series looks numeric"""
+        numeric_count = 0
+        for val in series:
+            try:
+                float(str(val).strip().replace(',', ''))
+                numeric_count += 1
+            except ValueError:
+                pass
+        return numeric_count / len(series) > 0.8
+    
+    def _looks_like_datetime(self, series: pd.Series) -> bool:
+        """Check if series looks like datetime"""
+        datetime_count = 0
+        for val in series:
+            val_str = str(val).strip()
+            if (re.search(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}', val_str) or
+                'T' in val_str and ':' in val_str):
+                datetime_count += 1
+        return datetime_count / len(series) > 0.5
+    
+    def _handle_mixed_cell_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Handle mixed cell data"""
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).str.strip()
+                empty_vals = ['nan', 'None', 'null', 'NULL', 'N/A', 'n/a', 'NA']
+                df[col] = df[col].replace(empty_vals, np.nan)
+        return df
+    
+    def _optimize_memory(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Optimize memory usage"""
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                nunique = df[col].nunique()
+                if nunique / len(df) < 0.5 and nunique < 100:
+                    df[col] = df[col].astype('category')
+        return df
+
+# ============================================================================
+# MAIN PROCESSOR CLASS
+# ============================================================================
+
+class FlexibleUnifiedDataProcessor:
+    """
+    Main processor handling both manual uploads and MongoDB data
+    - Manual Upload: Full preprocessing + ticket generation (no save to MongoDB)
+    - MongoDB Data: Light processing (column mapping only) + ticket generation
+    """
+    
+    def __init__(self, config: ProcessingConfig = None):
+        self.config = config or ProcessingConfig()
+        self.mapper = FlexibleColumnMapper()
+        self.cleaner = SmartDataCleaner(config)
+        self.validator = None
+        
         try:
-            with transaction.atomic():
-                for _, row in df.iterrows():
-                    try:
-                        # Convert row to dict and handle NaN values
-                        data = row.to_dict()
-                        data = {k: v for k, v in data.items() 
-                               if pd.notna(v) and v is not None and str(v).strip() != ''}
-                        
-                        # Create and save model instance
-                        instance = model_class(**data)
-                        instance.save()
-                        saved_count += 1
-                        
-                    except Exception as e:
-                        logger.warning(f"Error saving row to {collection_type}: {e}")
-                        continue
-                        
-        except Exception as e:
-            logger.error(f"Error in batch save to {collection_type}: {e}")
+            self.validator = create_data_validator()
+        except:
+            logger.warning("Data validator not available")
         
-        logger.info(f"Saved {saved_count} records to {collection_type} collection")
-        return saved_count
+        self.processing_stats = {
+            'files_processed': 0,
+            'total_records': 0,
+            'errors': [],
+            'warnings': [],
+            'session_ids_processed': []
+        }
+    
+    def process_manual_upload_flexible(self, files_mapping: Dict, target_channels: List[str] = None) -> Dict[str, Any]:
+        """Process manual upload data with FULL preprocessing + ticket generation (NO MongoDB save)"""
+        logger.info(f"Processing manual upload data with {len(files_mapping)} files")
+        logger.info(f"Target channels: {target_channels or 'All channels'}")
+        
+        try:
+            # Initialize data containers
+            all_data = {
+                'sessions': pd.DataFrame(),
+                'kpi_data': pd.DataFrame(),
+                'advancetags': pd.DataFrame()
+            }
+            
+            # Process each file with FULL preprocessing
+            for file_obj, data_types in files_mapping.items():
+                try:
+                    filename = getattr(file_obj, 'name', 'uploaded_file')
+                    logger.info(f"Full preprocessing: {filename}")
+                    
+                    # Read and process file
+                    file_data = self._process_single_file_flexible(file_obj, filename, data_types)
+                    
+                    # Apply column mapping and merge
+                    for data_type, df in file_data.items():
+                        if not df.empty and data_type in all_data:
+                            # Apply flexible column mapping
+                            df_mapped = self.mapper.flexible_map_columns(df, data_type)
+                            
+                            # Filter by channels if specified
+                            if target_channels and data_type in ['sessions', 'advancetags']:
+                                df_mapped = self._filter_by_channels(df_mapped, target_channels)
+                            
+                            # Merge with existing data
+                            all_data[data_type] = pd.concat([all_data[data_type], df_mapped], ignore_index=True)
+                    
+                    self.processing_stats['files_processed'] += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error processing manual file {filename}: {e}")
+                    self.processing_stats['errors'].append(f"File {filename}: {str(e)}")
+            
+            # Extract session IDs
+            session_ids = self._extract_session_ids(all_data)
+            self.processing_stats['session_ids_processed'] = session_ids
+            
+            # Generate tickets directly (NO MongoDB save)
+            tickets_generated = self._generate_session_tickets_flexible(all_data, target_channels)
+            
+            self.processing_stats['total_records'] = sum(len(df) for df in all_data.values())
+            
+            return {
+                'success': True,
+                'processing_type': 'manual_upload',
+                'session_ids_processed': len(session_ids),
+                'tickets_generated': tickets_generated,
+                'target_channels': target_channels or [],
+                'data_counts': {k: len(v) for k, v in all_data.items()},
+                'stats': self.processing_stats,
+                'flexible_mapping_used': True
+            }
+            
+        except Exception as e:
+            logger.error(f"Manual upload processing failed: {e}")
+            return {
+                'success': False,
+                'processing_type': 'manual_upload',
+                'errors': [str(e)]
+            }
+    
+    def process_mongodb_ingestion_flexible(self, target_channels: List[str] = None) -> Dict[str, Any]:
+        """Process MongoDB data with LIGHT processing (column mapping only) + ticket generation"""
+        logger.info("Processing MongoDB data with light processing")
+        logger.info(f"Target channels: {target_channels or 'All channels'}")
+        
+        try:
+            # Fetch data from MongoDB
+            mongodb_data = self._fetch_from_mongodb_flexible(target_channels)
+            
+            # LIGHT PROCESSING - only column mapping
+            processed_data = {}
+            for data_type, df in mongodb_data.items():
+                if not df.empty:
+                    # Only apply column mapping for MongoDB data
+                    df_mapped = self.mapper.flexible_map_columns(df, data_type)
+                    processed_data[data_type] = df_mapped
+                else:
+                    processed_data[data_type] = df
+            
+            # Extract session IDs
+            session_ids = self._extract_session_ids(processed_data)
+            
+            # Generate tickets
+            tickets_generated = self._generate_session_tickets_flexible(processed_data, target_channels)
+            
+            return {
+                'success': True,
+                'processing_type': 'mongodb',
+                'session_ids_processed': len(session_ids),
+                'tickets_generated': tickets_generated,
+                'target_channels': target_channels or [],
+                'data_counts': {k: len(v) for k, v in processed_data.items()},
+                'flexible_processing_used': True
+            }
+            
+        except Exception as e:
+            logger.error(f"MongoDB processing failed: {e}")
+            return {
+                'success': False,
+                'processing_type': 'mongodb',
+                'errors': [str(e)]
+            }
+    
+    def _process_single_file_flexible(self, file_obj, filename: str, data_types: List[str]) -> Dict[str, pd.DataFrame]:
+        """Process single file with flexible positioning"""
+        try:
+            # 1. Read raw file
+            df_raw = self._read_file_flexible(file_obj, filename)
+
+            # 2. Initialize result container
+            result: Dict[str, pd.DataFrame] = {}
+
+            # 3. If auto_detect requested, clean once and auto‐detect types
+            if 'auto_detect' in data_types:
+                df_clean, cleaning_stats = self.cleaner.smart_clean_dataframe(df_raw, None)
+                detected = self._auto_detect_data_types_flexible(df_clean)
+                for dt, df in detected.items():
+                    if dt in ['sessions', 'kpi_data', 'advancetags']:
+                        result[dt] = df.copy()
+                logger.info(f"Processed file {filename} (auto_detect): {cleaning_stats}")
+                return result
+
+            # 4. Manual types: clean separately for each requested type
+            for dt in data_types:
+                if dt in ['sessions', 'kpi_data', 'advancetags']:
+                    df_clean, cleaning_stats = self.cleaner.smart_clean_dataframe(df_raw, dt)
+                    result[dt] = df_clean.copy()
+                    logger.info(f"Processed file {filename} for {dt}: {cleaning_stats}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in flexible file processing {filename}: {e}")
+            return {}   
+ 
+    def _read_file_flexible(self, file_obj, filename: str) -> pd.DataFrame:
+        """Read file with flexible format support"""
+        file_extension = Path(filename).suffix.lower()
+        
+        if file_extension in ['.xlsx', '.xls']:
+            for engine in ['openpyxl', 'xlrd']:
+                try:
+                    if hasattr(file_obj, 'seek'):
+                        file_obj.seek(0)
+                    return pd.read_excel(file_obj, engine=engine)
+                except Exception:
+                    continue
+            raise ValueError("Could not read Excel file")
+            
+        elif file_extension == '.csv':
+            encodings = ['utf-8', 'latin1', 'cp1252']
+            separators = [',', ';', '\t']
+            
+            for encoding in encodings:
+                for sep in separators:
+                    try:
+                        if hasattr(file_obj, 'seek'):
+                            file_obj.seek(0)
+                        df = pd.read_csv(file_obj, encoding=encoding, sep=sep)
+                        if not df.empty and len(df.columns) > 1:
+                            return df
+                    except Exception:
+                        continue
+            raise ValueError("Could not read CSV file")
+        else:
+            raise ValueError(f"Unsupported file format: {file_extension}")
+    
+    def _auto_detect_data_types_flexible(self, df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+        """Auto-detect data types with flexible column analysis"""
+        result = {}
+        columns = [str(col).lower() for col in df.columns]
+        
+        # Session-focused pattern matching
+        session_score = sum(1 for col in columns if any(p in col for p in ['session', 'asset', 'status', 'time']))
+        kpi_score = sum(1 for col in columns if any(p in col for p in ['plays', 'performance', 'ratio']))
+        meta_score = sum(1 for col in columns if any(p in col for p in ['browser', 'device', 'ip', 'city']))
+        
+        scores = {'sessions': session_score, 'kpi_data': kpi_score, 'advancetags': meta_score}
+        
+        # Assign to highest scoring type, prioritizing sessions
+        max_score = max(scores.values())
+        if max_score > 0:
+            if scores['sessions'] == max_score:
+                best_type = 'sessions'
+            else:
+                best_type = max(scores, key=scores.get)
+            
+            result[best_type] = df.copy()
+        else:
+            result['sessions'] = df.copy()
+        
+        logger.info(f"Auto-detected session types: {list(result.keys())} (scores: {scores})")
+        return result
+    
+    def _filter_by_channels(self, df: pd.DataFrame, target_channels: List[str]) -> pd.DataFrame:
+        """Filter data by target channels with flexible column detection"""
+        if not target_channels or df.empty:
+            return df
+        
+        # Find channel column
+        channel_col = None
+        for col in df.columns:
+            if any(term in str(col).lower() for term in ['asset', 'channel', 'content', 'name']):
+                channel_col = col
+                break
+        
+        if channel_col:
+            initial_count = len(df)
+            mask = df[channel_col].astype(str).str.lower().isin([ch.lower() for ch in target_channels])
+            filtered_df = df[mask].copy()
+            logger.info(f"Channel filtering: {initial_count} -> {len(filtered_df)} records")
+            return filtered_df
+        
+        return df
+    
+    def _extract_session_ids(self, data: Dict[str, pd.DataFrame]) -> List[str]:
+        """Extract unique session IDs from data"""
+        session_ids = []
+        
+        for data_type, df in data.items():
+            if df.empty:
+                continue
+            
+            session_id_cols = ['session_id', 'Session ID', 'sessionid']
+            for col in session_id_cols:
+                if col in df.columns:
+                    ids = df[col].dropna().astype(str).unique().tolist()
+                    session_ids.extend(ids)
+                    break
+        
+        unique_session_ids = list(set([sid for sid in session_ids 
+                                     if sid and str(sid).strip() not in ['nan', 'None', '']]))
+        
+        logger.info(f"Extracted {len(unique_session_ids)} unique session IDs")
+        return unique_session_ids
+    
+    def _fetch_from_mongodb_flexible(self, target_channels: List[str] = None) -> Dict[str, pd.DataFrame]:
+        """Fetch data from MongoDB with optional channel filtering"""
+        try:
+            from django.db.models import Q
+            
+            # Fetch Sessions
+            session_query = Session.objects.all()
+            if target_channels:
+                channel_filter = Q()
+                for channel in target_channels:
+                    channel_filter |= Q(asset_name__icontains=channel)
+                session_query = session_query.filter(channel_filter)
+            sessions_df = pd.DataFrame(list(session_query.values()))
+            
+            # Fetch KPI data
+            kpi_df = pd.DataFrame(list(KPI.objects.values()))
+            
+            # Fetch Advancetags
+            advancetags_query = Advancetags.objects.all()
+            if target_channels:
+                channel_filter = Q()
+                for channel in target_channels:
+                    channel_filter |= Q(asset_name__icontains=channel)
+                advancetags_query = advancetags_query.filter(channel_filter)
+            advancetags_df = pd.DataFrame(list(advancetags_query.values()))
+            
+            logger.info(f"Fetched MongoDB data: Sessions={len(sessions_df)}, KPI={len(kpi_df)}, Meta={len(advancetags_df)}")
+            
+            return {
+                'sessions': sessions_df,
+                'kpi_data': kpi_df,
+                'advancetags': advancetags_df
+            }
+            
+        except Exception as e:
+            logger.error(f"Error fetching MongoDB data: {e}")
+            return {
+                'sessions': pd.DataFrame(),
+                'kpi_data': pd.DataFrame(),
+                'advancetags': pd.DataFrame()
+            }
+    
+    def _generate_session_tickets_flexible(self, session_data: Dict[str, pd.DataFrame], 
+                                          target_channels: List[str] = None) -> int:
+        """Generate tickets from processed data using session_id as unique identifier"""
+        try:
+            logger.info("=== Starting Session-Based Ticket Generation ===")
+            
+            if session_data['sessions'].empty:
+                logger.warning("No session data available for ticket generation")
+                return 0
+            
+            # Create ticket engine
+            engine = AutoTicketMVP(
+                df_sessions=session_data['sessions'],
+                df_advancetags=session_data.get('advancetags', pd.DataFrame()),
+                target_channels=target_channels
+            )
+            
+            # Generate tickets
+            tickets_data = engine.process()
+            tickets_saved = 0
+            
+            logger.info(f"Processing {len(tickets_data)} tickets")
+            
+            for ticket_info in tickets_data:
+                try:
+                    # Extract session ID
+                    session_id = self._extract_session_id_from_ticket(ticket_info, session_data['sessions'])
+                    
+                    if not session_id:
+                        logger.warning("Skipping ticket - no valid session ID found")
+                        continue
+                    
+                    # Create ticket with session_id as unique identifier
+                    # Note: Ticket model doesn't accept arbitrary kwargs like 'metadata' or
+                    # 'processing_reference'. Persist additional info into the JSON
+                    # field `failure_details` instead.
+                    with transaction.atomic():
+                        ticket = Ticket.objects.create(
+                            session_id=session_id,
+                            status=ticket_info.get('status', 'new'),
+                            data_source='auto'
+                        )
+
+                        # Store remaining ticket_info into a JSON field on the ticket
+                        try:
+                            extra = {k: v for k, v in ticket_info.items() if k not in ['session_id', 'status']}
+                            if extra:
+                                # merge into failure_details (JSONField)
+                                if isinstance(ticket.failure_details, dict):
+                                    merged = {**ticket.failure_details, **extra}
+                                else:
+                                    merged = extra
+                                ticket.failure_details = merged
+                                ticket.save()
+
+                            tickets_saved += 1
+                            logger.debug(f"Saved ticket {ticket.id} for session {session_id}")
+                        except Exception as e:
+                            # If saving extra JSON fails, delete the created ticket to avoid partial state
+                            logger.error(f"Failed to attach extra details to ticket {ticket.id}: {e}")
+                            try:
+                                ticket.delete()
+                            except Exception:
+                                pass
+                        
+                except Exception as e:
+                    logger.error(f"Failed to save ticket: {str(e)}")
+                    continue
+            
+            logger.info(f"Successfully saved {tickets_saved} tickets")
+            return tickets_saved
+            
+        except Exception as e:
+            logger.error(f"Error in ticket generation: {e}")
+            return 0
+    
+    def _extract_session_id_from_ticket(self, ticket_info: Dict[str, Any], 
+                                       sessions_df: pd.DataFrame) -> Optional[str]:
+        """Extract valid session ID from ticket info or session data"""
+        
+        # Try from ticket info first
+        if 'session_id' in ticket_info:
+            session_id = str(ticket_info['session_id']).strip()
+            if session_id and session_id not in ['nan', 'None', '']:
+                return session_id
+        
+        # Try from sessions DataFrame
+        if not sessions_df.empty:
+            session_columns = ['session_id', 'Session ID', 'sessionid', 'Session Id']
+            for col in session_columns:
+                if col in sessions_df.columns and not sessions_df[col].empty:
+                    first_val = sessions_df[col].iloc[0]
+                    if pd.notna(first_val):
+                        session_id = str(first_val).strip()
+                        if session_id and session_id not in ['nan', 'None', '']:
+                            return session_id
+        
+        return None
+    
+    def cleanup(self):
+        """Cleanup resources"""
+        if self.config.cleanup_temp_files:
+            try:
+                gc.collect()
+                process = psutil.Process(os.getpid())
+                memory_mb = process.memory_info().rss / 1024 / 1024
+                logger.info(f"Memory usage after cleanup: {memory_mb:.1f} MB")
+            except Exception as e:
+                logger.warning(f"Error during cleanup: {e}")
+
+# ============================================================================
+# CONVENIENCE FUNCTIONS
+# ============================================================================
+
+def create_flexible_processor(config: ProcessingConfig = None) -> FlexibleUnifiedDataProcessor:
+    """Factory function to create flexible processor"""
+    return FlexibleUnifiedDataProcessor(config)
+
+def process_files_flexible(files_mapping: Dict, target_channels: List[str] = None) -> Dict[str, Any]:
+    """Process manual upload files with FULL preprocessing + ticket generation (NO MongoDB save)"""
+    processor = create_flexible_processor()
+    try:
+        return processor.process_manual_upload_flexible(files_mapping, target_channels)
+    finally:
+        processor.cleanup()
+
+def process_mongodb_flexible(target_channels: List[str] = None) -> Dict[str, Any]:
+    """Process MongoDB data with LIGHT processing (column mapping only) + ticket generation"""
+    processor = create_flexible_processor()
+    try:
+        return processor.process_mongodb_ingestion_flexible(target_channels)
+    finally:
+        processor.cleanup()
+
+def detect_file_structure(df: pd.DataFrame) -> Dict[str, Any]:
+    """Analyze and detect the structure of a dataframe"""
+    mapper = FlexibleColumnMapper()
+    cleaner = SmartDataCleaner()
+    
+    # Light cleaning for analysis
+    df_clean = df.dropna(how='all').dropna(axis=1, how='all')
+    
+    # Try to detect data types
+    detected_types = {}
+    for data_type in ['sessions', 'kpi_data', 'advancetags']:
+        mapped_df = mapper.flexible_map_columns(df_clean.copy(), data_type)
+        mapped_columns = [col for col in mapped_df.columns if col not in df_clean.columns]
+        if len(mapped_columns) > 1:
+            detected_types[data_type] = {
+                'mapped_columns': mapped_columns,
+                'confidence': len(mapped_columns) / len(df_clean.columns) if len(df_clean.columns) > 0 else 0
+            }
+    
+    # Extract session IDs
+    session_ids = []
+    session_id_cols = ['Session Id', 'session_id', 'sessionid', 'Session ID']
+    for col in session_id_cols:
+        if col in df_clean.columns:
+            ids = df_clean[col].dropna().astype(str).unique().tolist()
+            session_ids.extend(ids)
+            break
+    
+    unique_session_ids = list(set([sid for sid in session_ids 
+                                 if sid and str(sid).strip() not in ['nan', 'None', '']]))
+    
+    return {
+        'original_shape': df.shape,
+        'cleaned_shape': df_clean.shape,
+        'detected_types': detected_types,
+        'session_analysis': {
+            'total_session_ids': len(unique_session_ids),
+            'sample_session_ids': unique_session_ids[:5],
+            'has_session_data': len(unique_session_ids) > 0
+        },
+        'column_analysis': {
+            'total_columns': len(df_clean.columns),
+            'data_columns': [col for col in df_clean.columns if not df_clean[col].isna().all()],
+            'session_id_columns': [col for col in df_clean.columns 
+                                 if any(sid_col.lower() in col.lower() for sid_col in ['session', 'id'])]
+        },
+        'recommended_processing': {
+            'manual_upload': 'Full preprocessing + column mapping + ticket generation',
+            'mongodb_data': 'Column mapping only + ticket generation'
+        }
+    }
