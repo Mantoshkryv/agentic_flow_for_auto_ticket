@@ -1,8 +1,14 @@
-# data_validation.py - COMPLETE AND FINAL VERSION
+# data_validation.py 
+
 """
-Comprehensive data validation and preprocessing module for ticket management system.
-Handles validation, cleaning, and quality monitoring for both uploaded files and database data.
-COMPLETE VERSION - All methods implemented, no truncations.
+Features:
+- Removes blank columns and rows intelligently
+- Eliminates instruction headers and unnecessary content
+- Advanced data quality monitoring
+- Memory-efficient processing
+- Session-only validation support
+- Variable channel validation
+- Prevents code duplicacy through imports
 """
 
 import pandas as pd
@@ -16,12 +22,23 @@ from pathlib import Path
 import psutil
 import os
 import ipaddress
+import gc
+
+# Import existing functions to prevent duplicacy
+try:
+    from .models import Session, KPI, Advancetags, Ticket
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# CONFIGURATION AND RESULT CLASSES
+# ============================================================================
+
 @dataclass
 class ValidationRule:
-    """Define validation rules for data columns."""
+    """Define validation rules for data columns"""
     column_name: str
     data_type: str
     required: bool = True
@@ -34,7 +51,7 @@ class ValidationRule:
 
 @dataclass
 class DataSchema:
-    """Define expected schema for datasets."""
+    """Define expected schema for datasets"""
     name: str
     rules: List[ValidationRule]
     min_rows: int = 1
@@ -43,7 +60,7 @@ class DataSchema:
 
 @dataclass
 class ValidationResult:
-    """Result of data validation."""
+    """Result of data validation"""
     is_valid: bool
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
@@ -51,37 +68,571 @@ class ValidationResult:
     failed_rows: int = 0
     quality_score: float = 0.0
     processing_time: float = 0.0
+    cleaned_columns: int = 0
+    removed_rows: int = 0
+
+@dataclass
+class CleaningConfig:
+    """Configuration for data cleaning operations"""
+    remove_blank_columns_threshold: float = 0.95  # Remove if 95%+ blank
+    remove_blank_rows_threshold: float = 0.90     # Remove if 90%+ blank
+    remove_instruction_rows: bool = True
+    clean_whitespace: bool = True
+    standardize_column_names: bool = True
+    remove_duplicate_rows: bool = True
+    handle_mixed_data_types: bool = True
+
+# ============================================================================
+# ENHANCED DATA CLEANER WITH INSTRUCTION REMOVAL
+# ============================================================================
+
+class EnhancedDataCleaner:
+    """Advanced data cleaner with intelligent preprocessing"""
+    
+    def __init__(self, config: CleaningConfig = None):
+        self.config = config or CleaningConfig()
+        self.cleaning_stats = {
+            'original_shape': None,
+            'final_shape': None,
+            'removed_columns': 0,
+            'removed_rows': 0,
+            'cleaned_instructions': 0,
+            'processing_time': 0.0
+        }
+        
+        # Patterns for identifying instruction rows and headers
+        self.instruction_patterns = [
+            r'instructions?:.*',
+            r'note:.*', 
+            r'please.*',
+            r'format:.*',
+            r'example:.*',
+            r'how\s+to.*',
+            r'step\s+\d+.*',
+            r'follow.*steps.*',
+            r'click.*here.*',
+            r'download.*',
+            r'upload.*',
+            r'select.*file.*',
+            r'description:.*',
+            r'help:.*',
+            r'warning:.*',
+            r'important:.*',
+            r'tips?:.*',
+            r'guide.*',
+            r'tutorial.*',
+            r'^\s*[-=*]+\s*$',  # Separator lines
+            r'^\s*\d+\.\s*',     # Numbered lists
+        ]
+        
+        # Patterns for unnecessary data
+        self.unnecessary_patterns = [
+            r'^\s*$',           # Empty rows
+            r'^null$',          # Null values
+            r'^n/?a$',          # N/A values
+            r'^none$',          # None values
+            r'^undefined$',     # Undefined values
+            r'^#.*',           # Comments
+            r'^//.*',          # Comments
+        ]
+
+    def comprehensive_clean(self, df: pd.DataFrame, data_type: str = None) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        """
+        Comprehensive data cleaning pipeline
+        
+        Args:
+            df: Input dataframe
+            data_type: Type of data (sessions, kpi_data, advancetags)
+            
+        Returns:
+            Tuple of (cleaned_dataframe, cleaning_statistics)
+        """
+        start_time = datetime.now()
+        self.cleaning_stats['original_shape'] = df.shape
+        
+        logger.info(f"Starting comprehensive cleaning for {df.shape[0]} rows, {df.shape[1]} columns")
+        
+        # 1. Remove instruction headers and unnecessary rows
+        df_clean = self._remove_instruction_rows(df)
+        
+        # 2. Remove unnecessary data and comments
+        df_clean = self._remove_unnecessary_data(df_clean)
+        
+        # 3. Remove blank columns based on threshold
+        df_clean = self._remove_blank_columns(df_clean)
+        
+        # 4. Remove blank rows based on threshold
+        df_clean = self._remove_blank_rows(df_clean)
+        
+        # 5. Clean and standardize column names
+        df_clean = self._clean_column_names(df_clean)
+        
+        # 6. Handle whitespace and empty values
+        df_clean = self._clean_whitespace(df_clean)
+        
+        # 7. Remove duplicate rows
+        if self.config.remove_duplicate_rows:
+            df_clean = self._remove_duplicates(df_clean)
+        
+        # 8. Handle mixed data types intelligently
+        if self.config.handle_mixed_data_types:
+            df_clean = self._handle_mixed_types(df_clean, data_type)
+        
+        # 9. Validate and clean specific data types
+        if data_type:
+            df_clean = self._clean_by_data_type(df_clean, data_type)
+        
+        # 10. Final validation and optimization
+        df_clean = self._optimize_dataframe(df_clean)
+        
+        # Update statistics
+        self.cleaning_stats['final_shape'] = df_clean.shape
+        self.cleaning_stats['removed_columns'] = df.shape[1] - df_clean.shape[1]
+        self.cleaning_stats['removed_rows'] = df.shape[0] - df_clean.shape[0]
+        self.cleaning_stats['processing_time'] = (datetime.now() - start_time).total_seconds()
+        
+        logger.info(f"Cleaning complete: {df.shape} -> {df_clean.shape}")
+        logger.info(f"Removed {self.cleaning_stats['removed_columns']} columns, {self.cleaning_stats['removed_rows']} rows")
+        
+        return df_clean, self.cleaning_stats
+
+    def _remove_instruction_rows(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove instruction headers and guide text"""
+        if not self.config.remove_instruction_rows:
+            return df
+            
+        rows_to_remove = []
+        instruction_count = 0
+        
+        for idx, row in df.iterrows():
+            # Convert row to string for pattern matching
+            row_text = ' '.join([str(val).lower().strip() for val in row.values if pd.notna(val) and str(val).strip()])
+            
+            # Skip empty rows in this step
+            if not row_text:
+                continue
+            
+            # Check for instruction patterns
+            for pattern in self.instruction_patterns:
+                if re.search(pattern, row_text, re.IGNORECASE):
+                    rows_to_remove.append(idx)
+                    instruction_count += 1
+                    break
+            
+            # Check if row looks like header/instruction based on structure
+            non_null_count = row.count()
+            if non_null_count == 1:  # Single cell rows often instructions
+                single_value = str([val for val in row.values if pd.notna(val)][0]).strip()
+                if len(single_value) > 50 and any(word in single_value.lower() for word in 
+                    ['instruction', 'note', 'please', 'step', 'click', 'select', 'download', 'upload']):
+                    rows_to_remove.append(idx)
+                    instruction_count += 1
+        
+        if rows_to_remove:
+            df_cleaned = df.drop(index=rows_to_remove).reset_index(drop=True)
+            self.cleaning_stats['cleaned_instructions'] = instruction_count
+            logger.info(f"Removed {len(rows_to_remove)} instruction/header rows")
+            return df_cleaned
+        
+        return df
+
+    def _remove_unnecessary_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove unnecessary data like comments and separators"""
+        rows_to_remove = []
+        
+        for idx, row in df.iterrows():
+            row_values = [str(val).strip() for val in row.values if pd.notna(val)]
+            
+            # Check if entire row matches unnecessary patterns
+            if len(row_values) == 1:
+                value = row_values[0].lower()
+                for pattern in self.unnecessary_patterns:
+                    if re.match(pattern, value, re.IGNORECASE):
+                        rows_to_remove.append(idx)
+                        break
+        
+        if rows_to_remove:
+            df_cleaned = df.drop(index=rows_to_remove).reset_index(drop=True)
+            logger.info(f"Removed {len(rows_to_remove)} unnecessary data rows")
+            return df_cleaned
+        
+        return df
+
+    def _remove_blank_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove columns that are mostly blank based on threshold"""
+        columns_to_remove = []
+        
+        for col in df.columns:
+            # Calculate blank percentage
+            total_cells = len(df[col])
+            if total_cells == 0:
+                columns_to_remove.append(col)
+                continue
+                
+            # Count blanks (NaN, empty strings, whitespace)
+            blank_count = 0
+            for val in df[col]:
+                if pd.isna(val) or str(val).strip() == '' or str(val).lower() in ['null', 'none', 'n/a']:
+                    blank_count += 1
+            
+            blank_percentage = blank_count / total_cells
+            
+            if blank_percentage >= self.config.remove_blank_columns_threshold:
+                columns_to_remove.append(col)
+        
+        if columns_to_remove:
+            df_cleaned = df.drop(columns=columns_to_remove)
+            logger.info(f"Removed {len(columns_to_remove)} mostly blank columns: {columns_to_remove[:5]}")
+            return df_cleaned
+        
+        return df
+
+    def _remove_blank_rows(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove rows that are mostly blank based on threshold"""
+        if df.empty:
+            return df
+            
+        rows_to_remove = []
+        
+        for idx, row in df.iterrows():
+            # Calculate blank percentage for this row
+            total_cells = len(row)
+            if total_cells == 0:
+                rows_to_remove.append(idx)
+                continue
+            
+            # Count blanks
+            blank_count = 0
+            for val in row.values:
+                if pd.isna(val) or str(val).strip() == '' or str(val).lower() in ['null', 'none', 'n/a']:
+                    blank_count += 1
+            
+            blank_percentage = blank_count / total_cells
+            
+            if blank_percentage >= self.config.remove_blank_rows_threshold:
+                rows_to_remove.append(idx)
+        
+        if rows_to_remove:
+            df_cleaned = df.drop(index=rows_to_remove).reset_index(drop=True)
+            logger.info(f"Removed {len(rows_to_remove)} mostly blank rows")
+            return df_cleaned
+        
+        return df
+
+    def _clean_column_names(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Clean and standardize column names"""
+        if not self.config.standardize_column_names:
+            return df
+            
+        original_columns = df.columns.tolist()
+        new_columns = []
+        
+        for col in df.columns:
+            # Convert to string and clean
+            clean_col = str(col).strip()
+            
+            # Remove special characters but preserve important ones
+            clean_col = re.sub(r'[^\w\s\(\)\%\.\-]', ' ', clean_col)
+            
+            # Normalize whitespace
+            clean_col = re.sub(r'\s+', ' ', clean_col).strip()
+            
+            # Handle empty column names
+            if not clean_col or clean_col.lower() in ['unnamed', 'null', 'none']:
+                clean_col = f'Column_{len(new_columns) + 1}'
+            
+            new_columns.append(clean_col)
+        
+        # Handle duplicate column names
+        seen = {}
+        final_columns = []
+        for col in new_columns:
+            if col in seen:
+                seen[col] += 1
+                final_columns.append(f"{col}_{seen[col]}")
+            else:
+                seen[col] = 0
+                final_columns.append(col)
+        
+        df.columns = final_columns
+        
+        # Log significant changes
+        changes = [(orig, new) for orig, new in zip(original_columns, final_columns) if str(orig) != new]
+        if changes:
+            logger.info(f"Cleaned {len(changes)} column names")
+        
+        return df
+
+    def _clean_whitespace(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Clean whitespace and standardize empty values"""
+        if not self.config.clean_whitespace:
+            return df
+            
+        # Clean string columns
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                # Strip whitespace and standardize empty values
+                df[col] = df[col].astype(str).str.strip()
+                
+                # Replace various empty representations with NaN
+                empty_values = ['', 'null', 'None', 'none', 'N/A', 'n/a', 'NA', 'NULL', '#N/A', '#NULL!', 'undefined']
+                df[col] = df[col].replace(empty_values, np.nan)
+                
+                # Convert back to object type to handle NaN properly
+                df[col] = df[col].where(df[col] != 'nan', np.nan)
+        
+        return df
+
+    def _remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove duplicate rows intelligently"""
+        if df.empty:
+            return df
+            
+        initial_count = len(df)
+        
+        # Remove exact duplicates
+        df_dedup = df.drop_duplicates()
+        
+        # For session data, also check for duplicates based on session_id
+        session_id_columns = ['Session ID', 'session_id', 'Session Id', 'sessionid']
+        session_id_col = None
+        
+        for col in session_id_columns:
+            if col in df_dedup.columns:
+                session_id_col = col
+                break
+        
+        if session_id_col:
+            # Keep the first occurrence of each session_id
+            df_dedup = df_dedup.drop_duplicates(subset=[session_id_col], keep='first')
+        
+        removed_count = initial_count - len(df_dedup)
+        if removed_count > 0:
+            logger.info(f"Removed {removed_count} duplicate rows")
+        
+        return df_dedup.reset_index(drop=True)
+
+    def _handle_mixed_types(self, df: pd.DataFrame, data_type: str = None) -> pd.DataFrame:
+        """Handle mixed data types intelligently"""
+        for col in df.columns:
+            # Skip if already proper type
+            if df[col].dtype in ['int64', 'float64', 'datetime64[ns]', 'bool']:
+                continue
+            
+            # Try numeric conversion
+            if self._should_be_numeric(df[col]):
+                df[col] = self._convert_to_numeric(df[col])
+            
+            # Try datetime conversion
+            elif self._should_be_datetime(df[col]):
+                df[col] = self._convert_to_datetime(df[col])
+            
+            # Try boolean conversion
+            elif self._should_be_boolean(df[col]):
+                df[col] = self._convert_to_boolean(df[col])
+        
+        return df
+
+    def _should_be_numeric(self, series: pd.Series) -> bool:
+        """Check if series should be converted to numeric"""
+        sample = series.dropna().head(100)
+        if len(sample) == 0:
+            return False
+        
+        numeric_count = 0
+        for val in sample:
+            try:
+                # Try to convert, handling common numeric formats
+                val_str = str(val).replace(',', '').replace('$', '').replace('%', '').strip()
+                float(val_str)
+                numeric_count += 1
+            except (ValueError, TypeError):
+                pass
+        
+        return numeric_count / len(sample) > 0.8
+
+    def _should_be_datetime(self, series: pd.Series) -> bool:
+        """Check if series should be converted to datetime"""
+        sample = series.dropna().head(50)
+        if len(sample) == 0:
+            return False
+        
+        datetime_count = 0
+        for val in sample:
+            val_str = str(val).strip()
+            # Check for common datetime patterns
+            if (re.search(r'\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}', val_str) or 
+                re.search(r'\\d{1,2}[-/]\\d{1,2}[-/]\\d{4}', val_str) or
+                'T' in val_str and ':' in val_str):
+                datetime_count += 1
+        
+        return datetime_count / len(sample) > 0.5
+
+    def _should_be_boolean(self, series: pd.Series) -> bool:
+        """Check if series should be converted to boolean"""
+        unique_vals = series.dropna().astype(str).str.lower().unique()
+        boolean_values = {'true', 'false', '1', '0', 'yes', 'no', 'y', 'n'}
+        
+        return len(set(unique_vals) - boolean_values) == 0 and len(unique_vals) <= 4
+
+    def _convert_to_numeric(self, series: pd.Series) -> pd.Series:
+        """Convert series to numeric with intelligent handling"""
+        def clean_numeric(val):
+            if pd.isna(val):
+                return val
+            val_str = str(val).replace(',', '').replace('$', '').replace('%', '').strip()
+            try:
+                return float(val_str)
+            except:
+                return np.nan
+        
+        return series.apply(clean_numeric)
+
+    def _convert_to_datetime(self, series: pd.Series) -> pd.Series:
+        """Convert series to datetime with error handling"""
+        return pd.to_datetime(series, errors='coerce', infer_datetime_format=True)
+
+    def _convert_to_boolean(self, series: pd.Series) -> pd.Series:
+        """Convert series to boolean with intelligent mapping"""
+        def map_boolean(val):
+            if pd.isna(val):
+                return val
+            val_str = str(val).lower().strip()
+            if val_str in ['true', '1', 'yes', 'y']:
+                return True
+            elif val_str in ['false', '0', 'no', 'n']:
+                return False
+            return np.nan
+        
+        return series.apply(map_boolean)
+
+    def _clean_by_data_type(self, df: pd.DataFrame, data_type: str) -> pd.DataFrame:
+        """Apply data type specific cleaning"""
+        if data_type == 'sessions':
+            # Clean session-specific fields
+            failure_columns = ['Video Start Failure', 'video_start_failure', 'Exit Before Video Starts', 'exit_before_video_starts']
+            for col in failure_columns:
+                if col in df.columns:
+                    df[col] = self._convert_to_boolean(df[col])
+        
+        elif data_type == 'kpi_data':
+            # Clean KPI numeric fields
+            numeric_fields = ['Plays', 'plays', 'Video Start Failures Technical', 'video_start_failures_technical']
+            for field in numeric_fields:
+                if field in df.columns:
+                    df[field] = pd.to_numeric(df[field], errors='coerce').fillna(0)
+        
+        elif data_type == 'advancetags':
+            # Clean metadata fields
+            ip_fields = ['IP', 'ip', 'IPv6', 'ipv6']
+            for field in ip_fields:
+                if field in df.columns:
+                    df[field] = df[field].apply(self._validate_ip_address)
+        
+        return df
+
+    def _validate_ip_address(self, ip_str):
+        """Validate and clean IP addresses"""
+        if pd.isna(ip_str):
+            return ip_str
+        try:
+            ipaddress.ip_address(str(ip_str).strip())
+            return str(ip_str).strip()
+        except ValueError:
+            return np.nan
+
+    def _optimize_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Optimize dataframe memory usage"""
+        initial_memory = df.memory_usage(deep=True).sum() / 1024 / 1024  # MB
+        
+        for col in df.columns:
+            col_type = df[col].dtype
+            
+            # Optimize object columns
+            if col_type == 'object':
+                unique_count = df[col].nunique()
+                total_count = len(df[col])
+                # Convert to category if low cardinality
+                if unique_count / total_count < 0.5 and unique_count < 100:
+                    df[col] = df[col].astype('category')
+            
+            # Downcast numeric columns
+            elif col_type in ['int64', 'int32']:
+                c_min = df[col].min()
+                c_max = df[col].max()
+                if c_min >= 0:  # Unsigned integers
+                    if c_max < np.iinfo(np.uint8).max:
+                        df[col] = df[col].astype(np.uint8)
+                    elif c_max < np.iinfo(np.uint16).max:
+                        df[col] = df[col].astype(np.uint16)
+                    elif c_max < np.iinfo(np.uint32).max:
+                        df[col] = df[col].astype(np.uint32)
+                else:  # Signed integers
+                    if c_min > np.iinfo(np.int8).min and c_max < np.iinfo(np.int8).max:
+                        df[col] = df[col].astype(np.int8)
+                    elif c_min > np.iinfo(np.int16).min and c_max < np.iinfo(np.int16).max:
+                        df[col] = df[col].astype(np.int16)
+                    elif c_min > np.iinfo(np.int32).min and c_max < np.iinfo(np.int32).max:
+                        df[col] = df[col].astype(np.int32)
+            
+            # Downcast floats
+            elif col_type == 'float64':
+                c_min = df[col].min()
+                c_max = df[col].max()
+                if not pd.isna(c_min) and not pd.isna(c_max):
+                    if c_min > np.finfo(np.float32).min and c_max < np.finfo(np.float32).max:
+                        df[col] = df[col].astype(np.float32)
+        
+        final_memory = df.memory_usage(deep=True).sum() / 1024 / 1024  # MB
+        if initial_memory > 0:
+            reduction = (initial_memory - final_memory) / initial_memory * 100
+            logger.info(f"Memory optimized: {initial_memory:.1f}MB -> {final_memory:.1f}MB ({reduction:.1f}% reduction)")
+        
+        return df
+
+# ============================================================================
+# DATA QUALITY MONITOR WITH ENHANCED METRICS
+# ============================================================================
 
 class DataQualityMonitor:
-    """Monitor and report data quality metrics."""
+    """Monitor and report data quality metrics"""
     
     def __init__(self):
         self.quality_metrics = {}
     
-    def analyze_data_quality(self, df: pd.DataFrame, dataset_name: str) -> Dict[str, Any]:
-        """Comprehensive data quality analysis."""
+    def comprehensive_quality_analysis(self, df: pd.DataFrame, dataset_name: str) -> Dict[str, Any]:
+        """Comprehensive data quality analysis with enhanced metrics"""
         start_time = datetime.now()
         
         metrics = {
             'dataset_name': dataset_name,
             'total_rows': len(df),
             'total_columns': len(df.columns),
+            'memory_usage_mb': df.memory_usage(deep=True).sum() / 1024 / 1024,
             'completeness': self._calculate_completeness(df),
-            'uniqueness': self._calculate_uniqueness(df),
+            'uniqueness': self._calculate_uniqueness(df), 
             'validity': self._calculate_validity(df),
             'consistency': self._calculate_consistency(df),
             'anomalies': self._detect_anomalies(df),
             'data_types': self._analyze_data_types(df),
+            'column_stats': self._calculate_column_statistics(df),
             'analysis_time': (datetime.now() - start_time).total_seconds()
         }
         
+        # Calculate overall quality score
         metrics['quality_score'] = self._calculate_quality_score(metrics)
+        
+        # Store metrics
         self.quality_metrics[dataset_name] = metrics
+        
+        logger.info(f"Quality analysis complete for {dataset_name}: Score = {metrics['quality_score']:.1f}/100")
+        
         return metrics
-    
+
     def _calculate_completeness(self, df: pd.DataFrame) -> Dict[str, float]:
-        """Calculate completeness score for each column."""
+        """Calculate completeness score for each column"""
         completeness = {}
+        
         for col in df.columns:
             non_null_count = df[col].notna().sum()
             total_count = len(df)
@@ -89,9 +640,9 @@ class DataQualityMonitor:
         
         completeness['overall'] = np.mean(list(completeness.values())) if completeness else 0
         return completeness
-    
+
     def _calculate_uniqueness(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Calculate uniqueness metrics."""
+        """Calculate uniqueness metrics"""
         uniqueness = {
             'duplicate_rows': df.duplicated().sum(),
             'duplicate_percentage': (df.duplicated().sum() / len(df)) * 100 if len(df) > 0 else 0,
@@ -107,69 +658,89 @@ class DataQualityMonitor:
             }
         
         return uniqueness
-    
+
     def _calculate_validity(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Calculate validity metrics based on data types and patterns."""
+        """Calculate validity metrics based on data types and patterns"""
         validity = {
             'invalid_emails': 0,
-            'invalid_dates': 0,
+            'invalid_dates': 0,  
             'invalid_numbers': 0,
-            'empty_strings': 0
+            'invalid_ips': 0,
+            'empty_strings': 0,
+            'format_violations': {}
         }
         
         for col in df.columns:
             col_lower = col.lower()
             
+            # Email validation
             if 'email' in col_lower:
-                email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-                invalid_emails = df[col].notna() & ~df[col].str.match(email_pattern, na=False)
+                email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$'
+                invalid_emails = df[col].notna() & ~df[col].astype(str).str.match(email_pattern, na=False)
                 validity['invalid_emails'] += invalid_emails.sum()
             
-            datetime_fields = ['session_start_time', 'session_end_time', 'video_start_time', 'timestamp', 'created_at']
+            # Date validation
+            datetime_fields = ['time', 'date', 'timestamp']
             if any(field in col_lower for field in datetime_fields):
                 try:
-                    pd.to_datetime(df[col], errors='raise')
+                    pd.to_datetime(df[col], format='mixed', errors='raise')
                 except:
-                    validity['invalid_dates'] += df[col].notna().sum()
+                    invalid_count = df[col].notna().sum()
+                    validity['invalid_dates'] += invalid_count
             
+            # IP address validation
+            if 'ip' in col_lower:
+                invalid_ips = 0
+                for val in df[col].dropna():
+                    try:
+                        ipaddress.ip_address(str(val))
+                    except ValueError:
+                        invalid_ips += 1
+                validity['invalid_ips'] += invalid_ips
+            
+            # Empty string count
             if df[col].dtype == 'object':
-                empty_strings = df[col].str.strip().eq('').sum()
+                empty_strings = df[col].astype(str).str.strip().eq('').sum()
                 validity['empty_strings'] += empty_strings
         
         return validity
-    
+
     def _calculate_consistency(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Calculate consistency metrics."""
+        """Calculate consistency metrics"""
         consistency = {
-            'data_type_consistency': {},
             'format_consistency': {},
-            'value_consistency': {}
+            'value_consistency': {},
+            'type_consistency': {}
         }
         
         for col in df.columns:
             if df[col].dtype == 'object':
                 non_null_values = df[col].dropna().astype(str)
                 if len(non_null_values) > 0:
-                    patterns = non_null_values.apply(lambda x: re.sub(r'\w', 'X', re.sub(r'\d', '9', x)))
+                    # Format consistency (pattern analysis)
+                    patterns = non_null_values.apply(lambda x: re.sub(r'\\w', 'X', re.sub(r'\\d', '9', str(x))))
                     pattern_variety = patterns.nunique() / len(patterns) if len(patterns) > 0 else 0
+                    
                     consistency['format_consistency'][col] = {
                         'pattern_variety': pattern_variety,
-                        'consistent': pattern_variety < 0.1
+                        'consistent': pattern_variety < 0.1,
+                        'most_common_pattern': patterns.value_counts().index[0] if len(patterns) > 0 else None
                     }
         
         return consistency
-    
+
     def _detect_anomalies(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Detect various types of data anomalies."""
+        """Detect various types of data anomalies"""
         anomalies = {
             'outliers': {},
             'suspicious_patterns': {},
             'statistical_anomalies': {}
         }
         
+        # Outlier detection for numeric columns
         numeric_columns = df.select_dtypes(include=[np.number]).columns
         for col in numeric_columns:
-            if df[col].notna().sum() > 0:
+            if df[col].notna().sum() > 10:  # Need at least 10 values
                 Q1 = df[col].quantile(0.25)
                 Q3 = df[col].quantile(0.75)
                 IQR = Q3 - Q1
@@ -179,9 +750,10 @@ class DataQualityMonitor:
                     anomalies['outliers'][col] = {
                         'count': len(outliers),
                         'percentage': (len(outliers) / len(df)) * 100,
-                        'values': outliers[col].tolist()[:10]
+                        'values': outliers[col].tolist()[:10]  # Sample outliers
                     }
         
+        # Suspicious pattern detection for text columns
         text_columns = df.select_dtypes(include=['object']).columns
         for col in text_columns:
             non_null_values = df[col].dropna()
@@ -190,424 +762,288 @@ class DataQualityMonitor:
                 if len(value_counts) > 0:
                     most_common_value = value_counts.index[0]
                     most_common_count = value_counts.iloc[0]
+                    dominance = most_common_count / len(non_null_values)
                     
-                    if most_common_count / len(non_null_values) > 0.5:
+                    # Flag if a single value dominates more than 80%
+                    if dominance > 0.8:
                         anomalies['suspicious_patterns'][col] = {
                             'dominant_value': most_common_value,
                             'frequency': most_common_count,
-                            'percentage': (most_common_count / len(non_null_values)) * 100
+                            'percentage': dominance * 100
                         }
         
         return anomalies
-    
-    def _analyze_data_types(self, df: pd.DataFrame) -> Dict[str, str]:
-        """Analyze data types of each column."""
-        return {col: str(dtype) for col, dtype in df.dtypes.items()}
-    
+
+    def _analyze_data_types(self, df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
+        """Analyze data types and their suitability"""
+        type_analysis = {}
+        
+        for col in df.columns:
+            type_analysis[col] = {
+                'current_type': str(df[col].dtype),
+                'null_count': df[col].isnull().sum(),
+                'null_percentage': (df[col].isnull().sum() / len(df)) * 100,
+                'unique_values': df[col].nunique(),
+                'memory_usage': df[col].memory_usage(deep=True)
+            }
+            
+            # Suggest better type if applicable
+            if df[col].dtype == 'object':
+                sample = df[col].dropna().head(100)
+                if len(sample) > 0:
+                    # Check if could be numeric
+                    try:
+                        pd.to_numeric(sample)
+                        type_analysis[col]['suggested_type'] = 'numeric'
+                    except:
+                        # Check if could be datetime
+                        try:
+                            pd.to_datetime(sample)
+                            type_analysis[col]['suggested_type'] = 'datetime'
+                        except:
+                            # Check if could be category
+                            if sample.nunique() / len(sample) < 0.5:
+                                type_analysis[col]['suggested_type'] = 'category'
+        
+        return type_analysis
+
+    def _calculate_column_statistics(self, df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
+        """Calculate detailed statistics for each column"""
+        column_stats = {}
+        
+        for col in df.columns:
+            stats = {
+                'count': df[col].count(),
+                'null_count': df[col].isnull().sum(),
+                'unique_count': df[col].nunique()
+            }
+            
+            if df[col].dtype in ['int64', 'int32', 'float64', 'float32']:
+                # Numeric statistics
+                stats.update({
+                    'mean': df[col].mean(),
+                    'std': df[col].std(),
+                    'min': df[col].min(),
+                    'max': df[col].max(),
+                    'q25': df[col].quantile(0.25),
+                    'q50': df[col].quantile(0.50),
+                    'q75': df[col].quantile(0.75)
+                })
+            
+            elif df[col].dtype == 'object':
+                # Text statistics
+                non_null = df[col].dropna().astype(str)
+                if len(non_null) > 0:
+                    stats.update({
+                        'avg_length': non_null.str.len().mean(),
+                        'max_length': non_null.str.len().max(),
+                        'min_length': non_null.str.len().min(),
+                        'most_common': non_null.value_counts().head(3).to_dict()
+                    })
+            
+            column_stats[col] = stats
+        
+        return column_stats
+
     def _calculate_quality_score(self, metrics: Dict[str, Any]) -> float:
-        """Calculate overall data quality score (0-100)."""
+        """Calculate overall data quality score (0-100)"""
         scores = []
+        weights = []
         
+        # Completeness score (30% weight)
         completeness_score = metrics['completeness'].get('overall', 0)
-        scores.append(completeness_score * 0.3)
+        scores.append(completeness_score)
+        weights.append(0.30)
         
+        # Uniqueness score (20% weight)
         duplicate_penalty = min(metrics['uniqueness']['duplicate_percentage'], 20)
         uniqueness_score = max(0, 100 - duplicate_penalty)
-        scores.append(uniqueness_score * 0.2)
+        scores.append(uniqueness_score)
+        weights.append(0.20)
         
-        validity_issues = sum(metrics['validity'].values())
+        # Validity score (25% weight) 
+        validity_issues = sum([
+            metrics['validity']['invalid_emails'],
+            metrics['validity']['invalid_dates'], 
+            metrics['validity']['invalid_numbers'],
+            metrics['validity']['invalid_ips']
+        ])
         total_cells = metrics['total_rows'] * metrics['total_columns']
         validity_score = max(0, 100 - (validity_issues / total_cells * 100)) if total_cells > 0 else 100
-        scores.append(validity_score * 0.25)
+        scores.append(validity_score)
+        weights.append(0.25)
         
+        # Anomaly score (25% weight)
         total_outliers = sum(
-            anomaly.get('count', 0) 
+            anomaly.get('count', 0)
             for anomaly in metrics['anomalies'].get('outliers', {}).values()
         )
         anomaly_penalty = min((total_outliers / metrics['total_rows']) * 100, 25) if metrics['total_rows'] > 0 else 0
         anomaly_score = max(0, 100 - anomaly_penalty)
-        scores.append(anomaly_score * 0.25)
+        scores.append(anomaly_score)
+        weights.append(0.25)
         
-        return sum(scores)
+        # Calculate weighted average
+        weighted_score = sum(score * weight for score, weight in zip(scores, weights))
+        return round(weighted_score, 2)
 
-class MemoryManager:
-    """Manage memory usage during data processing."""
-    
-    def __init__(self, max_memory_mb: int = 1000, chunk_size: int = 10000):
-        self.max_memory_mb = max_memory_mb
-        self.chunk_size = chunk_size
-        self.current_memory_mb = 0
-    
-    def get_memory_usage(self) -> float:
-        """Get current memory usage in MB."""
-        process = psutil.Process(os.getpid())
-        return process.memory_info().rss / 1024 / 1024
-    
-    def check_memory_limit(self) -> bool:
-        """Check if memory usage is within limits."""
-        current_usage = self.get_memory_usage()
-        return current_usage < self.max_memory_mb
-    
-    def process_in_chunks(self, df: pd.DataFrame, processor_func) -> List[Any]:
-        """Process DataFrame in chunks to manage memory."""
-        results = []
-        total_rows = len(df)
-        processed = 0
-        
-        logger.info(f"Processing {total_rows:,} rows in chunks of {self.chunk_size:,}")
-        
-        while processed < total_rows:
-            if not self.check_memory_limit():
-                logger.warning(f"Memory limit exceeded: {self.get_memory_usage():.1f}MB")
-                break
-            
-            end_idx = min(processed + self.chunk_size, total_rows)
-            chunk = df.iloc[processed:end_idx]
-            
-            try:
-                chunk_results = processor_func(chunk)
-                results.extend(chunk_results)
-                processed = end_idx
-                
-                progress = (processed / total_rows) * 100
-                logger.info(f"Processed {processed:,}/{total_rows:,} rows ({progress:.1f}%)")
-                
-            except Exception as e:
-                logger.error(f"Error processing chunk {processed}-{end_idx}: {e}")
-                processed = end_idx
-        
-        return results
+# ============================================================================
+# COMPREHENSIVE DATA VALIDATOR
+# ============================================================================
 
-class DataValidator:
-    """Comprehensive data validator for ticket management system."""
+class ComprehensiveDataValidator:
+    """Main validator class that orchestrates cleaning and validation"""
     
-    def __init__(self):
-        self.memory_manager = MemoryManager()
+    def __init__(self, cleaning_config: CleaningConfig = None):
+        self.cleaner = EnhancedDataCleaner(cleaning_config)
         self.quality_monitor = DataQualityMonitor()
-        self.schemas = self._define_schemas()
+        self.validation_history = []
     
-    def _validate_ip_address(self, ip_value: Any) -> bool:
-        """Custom validator for IP addresses."""
-        if pd.isna(ip_value):
-            return True
+    def validate_and_clean(self, df: pd.DataFrame, data_type: str = None, 
+                          dataset_name: str = None) -> Tuple[pd.DataFrame, ValidationResult]:
+        """
+        Main validation and cleaning method
         
-        ip_str = str(ip_value).strip()
-        if not ip_str:
-            return True
+        Args:
+            df: Input dataframe
+            data_type: Type of data (sessions, kpi_data, advancetags)
+            dataset_name: Name for logging and tracking
+            
+        Returns:
+            Tuple of (cleaned_dataframe, validation_result)
+        """
+        start_time = datetime.now()
+        dataset_name = dataset_name or f"dataset_{len(self.validation_history) + 1}"
         
-        try:
-            ipaddress.ip_address(ip_str)
-            return True
-        except ValueError:
-            return False
-    
-    def _validate_ipv6_address(self, ipv6_value: Any) -> bool:
-        """Custom validator for IPv6 addresses."""
-        if pd.isna(ipv6_value):
-            return True
+        logger.info(f"Starting validation and cleaning for {dataset_name}")
         
-        ipv6_str = str(ipv6_value).strip()
-        if not ipv6_str:
-            return True
+        # 1. Comprehensive cleaning
+        df_clean, cleaning_stats = self.cleaner.comprehensive_clean(df, data_type)
         
-        try:
-            ipaddress.IPv6Address(ipv6_str)
-            return True
-        except ValueError:
-            return False
-    
-    def _define_schemas(self) -> Dict[str, DataSchema]:
-        """Define validation schemas PERFECTLY ALIGNED with Django models."""
+        # 2. Quality analysis
+        quality_metrics = self.quality_monitor.comprehensive_quality_analysis(df_clean, dataset_name)
         
-        session_schema = DataSchema(
-            name="sessions",
-            rules=[
-                ValidationRule("viewer_id", "string", required=False, max_length=200),
-                ValidationRule("session_id", "string", required=True, max_length=200, 
-                             pattern=r"^[A-Za-z0-9-_]+$"),
-                ValidationRule("session_start_time", "datetime", required=True),
-                ValidationRule("status", "string", required=True, max_length=50),
-                ValidationRule("ended_status", "string", required=False, max_length=200,
-                             allowed_values=["VSF-T", "VSF-B", "EBVS", "SUCCESS"]),
-                ValidationRule("video_start_failure", "boolean", required=False),
-                ValidationRule("asset_name", "string", required=False, max_length=300),
-                ValidationRule("channel", "string", required=False, max_length=200),
-                ValidationRule("starting_bitrate", "float", required=False, min_value=0),
-                ValidationRule("playing_time", "float", required=False, min_value=0, max_value=86400),
-                ValidationRule("rebuffering_ratio", "float", required=False, min_value=0, max_value=1),
-                ValidationRule("avg_peak_bitrate", "float", required=False, min_value=0),
-                ValidationRule("avg_average_bitrate", "float", required=False, min_value=0),
-                ValidationRule("average_framerate", "float", required=False, min_value=0),
-                ValidationRule("connection_induced_rebuffering_ratio", "float", required=False, min_value=0, max_value=1),
-                ValidationRule("total_video_restart_time", "float", required=False, min_value=0),
-                ValidationRule("bitrate_switches", "int", required=False, min_value=0),
-                ValidationRule("ended_session", "boolean", required=False),
-                ValidationRule("impacted_session", "boolean", required=False),
-                ValidationRule("exit_before_video_starts", "boolean", required=False),
-                ValidationRule("session_end_time", "datetime", required=False),
-                ValidationRule("video_start_time", "datetime", required=False),
-                ValidationRule("created_at", "datetime", required=False),
-                ValidationRule("updated_at", "datetime", required=False),
-            ],
-            min_rows=1,
-            allow_extra_columns=True
+        # 3. Validation checks
+        validation_errors = []
+        validation_warnings = []
+        
+        # Check if dataframe is empty after cleaning
+        if df_clean.empty:
+            validation_errors.append("Dataframe is empty after cleaning")
+        
+        # Check if essential columns exist for data type
+        if data_type:
+            missing_essential = self._check_essential_columns(df_clean, data_type)
+            if missing_essential:
+                validation_warnings.extend([f"Missing recommended column: {col}" for col in missing_essential])
+        
+        # Check data quality thresholds
+        if quality_metrics['quality_score'] < 50:
+            validation_warnings.append(f"Data quality score is low: {quality_metrics['quality_score']:.1f}/100")
+        
+        # Create validation result
+        processing_time = (datetime.now() - start_time).total_seconds()
+        
+        result = ValidationResult(
+            is_valid=len(validation_errors) == 0,
+            errors=validation_errors,
+            warnings=validation_warnings,
+            processed_rows=len(df_clean),
+            failed_rows=len(df) - len(df_clean),
+            quality_score=quality_metrics['quality_score'],
+            processing_time=processing_time,
+            cleaned_columns=cleaning_stats['removed_columns'],
+            removed_rows=cleaning_stats['removed_rows']
         )
         
-        kpi_schema = DataSchema(
-            name="kpi_data",
-            rules=[
-                ValidationRule("timestamp", "datetime", required=True),
-                ValidationRule("plays", "int", required=False, min_value=0),
-                ValidationRule("video_start_failures_technical", "int", required=False, min_value=0),
-                ValidationRule("video_start_failures_business", "int", required=False, min_value=0),
-                ValidationRule("exit_before_video_starts", "int", required=False, min_value=0),
-                ValidationRule("video_playback_failures_technical", "int", required=False, min_value=0),
-                ValidationRule("video_playback_failures_business", "int", required=False, min_value=0),
-                ValidationRule("playing_time_ended_mins", "float", required=False, min_value=0),
-                ValidationRule("streaming_performance_index", "float", required=False, 
-                             min_value=0, max_value=100),
-                ValidationRule("video_start_time_sec", "float", required=False, min_value=0),
-                ValidationRule("rebuffering_ratio_pct", "float", required=False, min_value=0, max_value=100),
-                ValidationRule("connection_induced_rebuffering_ratio_pct", "float", required=False, min_value=0, max_value=100),
-                ValidationRule("video_restart_time_sec", "float", required=False, min_value=0),
-                ValidationRule("avg_peak_bitrate_mbps", "float", required=False, min_value=0),
-                ValidationRule("created_at", "datetime", required=False),
-            ],
-            min_rows=1,
-            allow_extra_columns=True
-        )
+        # Store validation history
+        self.validation_history.append({
+            'dataset_name': dataset_name,
+            'timestamp': datetime.now(),
+            'result': result,
+            'quality_metrics': quality_metrics,
+            'cleaning_stats': cleaning_stats
+        })
         
-        advancetags_schema = DataSchema(
-            name="advancetags",
-            rules=[
-                ValidationRule("session_id", "string", required=True, max_length=200,
-                             pattern=r"^[A-Za-z0-9-_]+$"),
-                ValidationRule("asset_name", "string", required=False, max_length=300),
-                ValidationRule("content_category", "string", required=False, max_length=200),
-                ValidationRule("browser_name", "string", required=False, max_length=100),
-                ValidationRule("browser_version", "string", required=False, max_length=100),
-                ValidationRule("device_hardware_type", "string", required=False, max_length=100),
-                ValidationRule("device_manufacturer", "string", required=False, max_length=100),
-                ValidationRule("device_marketing_name", "string", required=False, max_length=200),
-                ValidationRule("device_model", "string", required=False, max_length=100),
-                ValidationRule("device_name", "string", required=False, max_length=200),
-                ValidationRule("device_operating_system", "string", required=False, max_length=100),
-                ValidationRule("device_operating_system_family", "string", required=False, max_length=100),
-                ValidationRule("device_operating_system_version", "string", required=False, max_length=100),
-                ValidationRule("app_name", "string", required=False, max_length=100),
-                ValidationRule("app_version", "string", required=False, max_length=100),
-                ValidationRule("player_framework_name", "string", required=False, max_length=100),
-                ValidationRule("player_framework_version", "string", required=False, max_length=100),
-                ValidationRule("last_cdn", "string", required=False, max_length=200),
-                ValidationRule("cdn", "string", required=False, max_length=200),
-                ValidationRule("channel", "string", required=False, max_length=200),
-                ValidationRule("city", "string", required=False, max_length=100),
-                ValidationRule("state", "string", required=False, max_length=100),
-                ValidationRule("country", "string", required=False, max_length=100),
-                ValidationRule("address", "string", required=False, max_length=300),
-                ValidationRule("isp_name", "string", required=False, max_length=200),
-                ValidationRule("asn_name", "string", required=False, max_length=200),
-                ValidationRule("ip_address", "string", required=False, custom_validator=self._validate_ip_address),
-                ValidationRule("ipv6_address", "string", required=False, custom_validator=self._validate_ipv6_address),
-                ValidationRule("stream_url", "string", required=False),
-                ValidationRule("created_at", "datetime", required=False),
-            ],
-            min_rows=1,
-            allow_extra_columns=True
-        )
+        logger.info(f"Validation complete for {dataset_name}: {'PASSED' if result.is_valid else 'FAILED'}")
+        logger.info(f"Quality score: {result.quality_score:.1f}/100, Processing time: {result.processing_time:.2f}s")
+        
+        return df_clean, result
+    
+    def _check_essential_columns(self, df: pd.DataFrame, data_type: str) -> List[str]:
+        """Check for essential columns based on data type"""
+        essential_columns = {
+            'sessions': ['session_id', 'Session ID'],
+            'kpi_data': ['timestamp', 'Timestamp', 'plays', 'Plays'], 
+            'advancetags': ['session_id', 'Session ID', 'Session Id']
+        }
+        
+        if data_type not in essential_columns:
+            return []
+        
+        missing = []
+        required = essential_columns[data_type]
+        
+        # Check if at least one variant exists
+        for req in required[::2]:  # Check every other (base names)
+            variants = [req, req.replace('_', ' ').title(), req.title()]
+            if not any(variant in df.columns for variant in variants):
+                missing.append(req)
+        
+        return missing
+    
+    def get_validation_summary(self) -> Dict[str, Any]:
+        """Get summary of all validation operations"""
+        if not self.validation_history:
+            return {'message': 'No validations performed yet'}
+        
+        total_validations = len(self.validation_history)
+        successful_validations = sum(1 for h in self.validation_history if h['result'].is_valid)
+        
+        avg_quality_score = np.mean([h['quality_metrics']['quality_score'] for h in self.validation_history])
+        avg_processing_time = np.mean([h['result'].processing_time for h in self.validation_history])
         
         return {
-            "session": session_schema,
-            "kpi_data": kpi_schema,
-            "advancetags": advancetags_schema,
-
+            'total_validations': total_validations,
+            'successful_validations': successful_validations,
+            'success_rate': (successful_validations / total_validations) * 100,
+            'average_quality_score': round(avg_quality_score, 2),
+            'average_processing_time': round(avg_processing_time, 2),
+            'latest_validation': self.validation_history[-1]['timestamp'],
+            'total_rows_processed': sum(h['result'].processed_rows for h in self.validation_history),
+            'total_rows_cleaned': sum(h['result'].removed_rows for h in self.validation_history),
         }
-    
-    def validate_dataframe(self, df: pd.DataFrame, schema_name: str) -> ValidationResult:
-        """Validate DataFrame against specified schema."""
-        start_time = datetime.now()
-        
-        if schema_name not in self.schemas:
-            return ValidationResult(
-                is_valid=False,
-                errors=[f"Unknown schema: {schema_name}. Available: {list(self.schemas.keys())}"]
-            )
-        
-        schema = self.schemas[schema_name]
-        result = ValidationResult()
-        
-        logger.info(f"Validating {schema_name} data: {len(df)} rows, {len(df.columns)} columns")
-        
-        self._validate_structure(df, schema, result)
-        self._validate_row_count(df, schema, result)
-        
-        if result.is_valid:
-            self._validate_columns(df, schema, result)
-        
-        quality_metrics = self.quality_monitor.analyze_data_quality(df, schema_name)
-        result.quality_score = quality_metrics['quality_score']
-        
-        if result.quality_score < 70:
-            result.warnings.append(f"Low data quality score: {result.quality_score:.1f}/100")
-        
-        if schema_name in ['session', 'meta', 'advancetags']:
-            self._validate_critical_fields(df, schema_name, result)
-        
-        result.processing_time = (datetime.now() - start_time).total_seconds()
-        
-        logger.info(f"Validation completed for {schema_name}: "
-                   f"Valid={result.is_valid}, Quality={result.quality_score:.1f}/100, "
-                   f"Errors={len(result.errors)}, Warnings={len(result.warnings)}")
-        
-        return result
-    
-    def _validate_critical_fields(self, df: pd.DataFrame, schema_name: str, result: ValidationResult):
-        """Validate fields critical for ticket generation."""
-        if schema_name == 'session':
-            status_fields = ['ended_status', 'status', 'video_start_failure']
-            has_status_field = any(field in df.columns for field in status_fields)
-            if not has_status_field:
-                result.warnings.append(
-                    f"No failure detection fields found ({status_fields}). "
-                    "Ticket generation may not work properly."
-                )
-            
-            if 'session_id' not in df.columns:
-                result.errors.append("Missing required field: session_id")
-        
-        elif schema_name in ['meta', 'advancetags']:
-            correlation_fields = ['isp_name', 'cdn', 'city']
-            missing_correlation = [field for field in correlation_fields if field not in df.columns]
-            if missing_correlation:
-                result.warnings.append(
-                    f"Missing correlation fields {missing_correlation}. "
-                    "Advanced ticket diagnosis may be limited."
-                )
-            
-            if 'session_id' not in df.columns:
-                result.errors.append("Missing required field: session_id (needed for merging with session data)")
-    
-    def _validate_structure(self, df: pd.DataFrame, schema: DataSchema, result: ValidationResult):
-        """Validate DataFrame structure."""
-        required_columns = [rule.column_name for rule in schema.rules if rule.required]
-        missing_columns = set(required_columns) - set(df.columns)
-        
-        if missing_columns:
-            result.is_valid = False
-            result.errors.append(f"Missing required columns: {sorted(missing_columns)}")
-        
-        if not schema.allow_extra_columns:
-            schema_columns = {rule.column_name for rule in schema.rules}
-            extra_columns = set(df.columns) - schema_columns
-            if extra_columns:
-                result.warnings.append(f"Extra columns found: {sorted(extra_columns)}")
-    
-    def _validate_row_count(self, df: pd.DataFrame, schema: DataSchema, result: ValidationResult):
-        """Validate row count requirements."""
-        row_count = len(df)
-        
-        if row_count < schema.min_rows:
-            result.is_valid = False
-            result.errors.append(f"Insufficient rows: {row_count} < {schema.min_rows}")
-        
-        if schema.max_rows and row_count > schema.max_rows:
-            result.warnings.append(f"Row count exceeds recommended maximum: {row_count} > {schema.max_rows}")
-    
-    def _validate_columns(self, df: pd.DataFrame, schema: DataSchema, result: ValidationResult):
-        """Validate individual columns."""
-        for rule in schema.rules:
-            if rule.column_name not in df.columns:
-                continue
-            
-            column_data = df[rule.column_name]
-            self._validate_column(column_data, rule, result)
-    
-    def _validate_column(self, column_data: pd.Series, rule: ValidationRule, result: ValidationResult):
-        """Validate a single column."""
-        column_name = rule.column_name
-        
-        if rule.data_type == "datetime":
-            try:
-                pd.to_datetime(column_data, errors='raise')
-            except:
-                invalid_count = column_data.notna().sum() - pd.to_datetime(column_data, errors='coerce').notna().sum()
-                if invalid_count > 0:
-                    result.errors.append(f"{column_name}: {invalid_count} invalid datetime values")
-        
-        elif rule.data_type == "boolean":
-            valid_boolean_values = [True, False, 1, 0, '1', '0', 'true', 'false', 'True', 'False', 
-                                  'yes', 'no', 'Yes', 'No', 'VSF-T', 'VSF-B', 'EBVS', 'SUCCESS']
-            non_null_data = column_data.dropna()
-            if len(non_null_data) > 0:
-                invalid_booleans = ~non_null_data.isin(valid_boolean_values)
-                if invalid_booleans.sum() > 0:
-                    result.warnings.append(f"{column_name}: {invalid_booleans.sum()} values may need boolean conversion")
-        
-        elif rule.data_type in ["int", "float"]:
-            numeric_data = pd.to_numeric(column_data, errors='coerce')
-            invalid_count = column_data.notna().sum() - numeric_data.notna().sum()
-            if invalid_count > 0:
-                result.errors.append(f"{column_name}: {invalid_count} non-numeric values")
-            
-            valid_numeric = numeric_data.dropna()
-            if rule.min_value is not None:
-                below_min = (valid_numeric < rule.min_value).sum()
-                if below_min > 0:
-                    result.errors.append(f"{column_name}: {below_min} values below minimum {rule.min_value}")
-            
-            if rule.max_value is not None:
-                above_max = (valid_numeric > rule.max_value).sum()
-                if above_max > 0:
-                    result.errors.append(f"{column_name}: {above_max} values above maximum {rule.max_value}")
-        
-        if rule.allowed_values:
-            invalid_values = column_data[~column_data.isin(rule.allowed_values + [None, np.nan])]
-            if len(invalid_values) > 0:
-                unique_invalid = invalid_values.unique()[:5]
-                result.errors.append(f"{column_name}: Invalid values found: {list(unique_invalid)}")
-        
-        if rule.pattern and column_data.dtype == 'object':
-            non_null_data = column_data.dropna()
-            if len(non_null_data) > 0:
-                pattern_matches = non_null_data.str.match(rule.pattern, na=False)
-                invalid_pattern_count = (~pattern_matches).sum()
-                if invalid_pattern_count > 0:
-                    result.errors.append(f"{column_name}: {invalid_pattern_count} values don't match pattern")
-        
-        if rule.max_length and column_data.dtype == 'object':
-            non_null_data = column_data.dropna().astype(str)
-            if len(non_null_data) > 0:
-                too_long = non_null_data.str.len() > rule.max_length
-                if too_long.sum() > 0:
-                    result.warnings.append(f"{column_name}: {too_long.sum()} values exceed max length {rule.max_length}")
-        
-        if rule.custom_validator:
-            try:
-                non_null_data = column_data.dropna()
-                if len(non_null_data) > 0:
-                    invalid_custom = ~non_null_data.apply(rule.custom_validator)
-                    if invalid_custom.sum() > 0:
-                        result.errors.append(f"{column_name}: {invalid_custom.sum()} values failed custom validation")
-            except Exception as e:
-                result.warnings.append(f"{column_name}: Custom validation error: {str(e)}")
 
-# Factory function for easy access
-def create_validator() -> DataValidator:
-    """Create a new DataValidator instance."""
-    return DataValidator()
+# ============================================================================
+# CONVENIENCE FUNCTIONS - PREVENT DUPLICACY
+# ============================================================================
 
-# Convenience functions for views.py compatibility
-def validate_session_data(df: pd.DataFrame) -> ValidationResult:
-    """Quick validation for session data."""
-    validator = create_validator()
-    return validator.validate_dataframe(df, "session")
+def create_data_validator(cleaning_config: CleaningConfig = None) -> ComprehensiveDataValidator:
+    """Factory function to create data validator"""
+    return ComprehensiveDataValidator(cleaning_config)
 
-def validate_kpi_data(df: pd.DataFrame) -> ValidationResult:
-    """Quick validation for KPI data."""
-    validator = create_validator()
-    return validator.validate_dataframe(df, "kpi")
+def quick_clean_dataframe(df: pd.DataFrame, data_type: str = None) -> pd.DataFrame:
+    """Quick cleaning function for simple use cases"""
+    cleaner = EnhancedDataCleaner()
+    cleaned_df, _ = cleaner.comprehensive_clean(df, data_type)
+    return cleaned_df
 
-def validate_metadata(df: pd.DataFrame) -> ValidationResult:
-    """Quick validation for metadata."""
-    validator = create_validator()
-    return validator.validate_dataframe(df, "meta")
+def analyze_data_quality(df: pd.DataFrame, dataset_name: str = "dataset") -> Dict[str, Any]:
+    """Standalone data quality analysis"""
+    monitor = DataQualityMonitor()
+    return monitor.comprehensive_quality_analysis(df, dataset_name)
+
+def validate_session_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, ValidationResult]:
+    """Specialized validation for session data"""
+    validator = create_data_validator()
+    return validator.validate_and_clean(df, 'sessions', 'session_data')
+
+def validate_kpi_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, ValidationResult]:
+    """Specialized validation for KPI data"""
+    validator = create_data_validator()
+    return validator.validate_and_clean(df, 'kpi_data', 'kpi_data')
+
+def validate_metadata(df: pd.DataFrame) -> Tuple[pd.DataFrame, ValidationResult]:
+    """Specialized validation for metadata/advancetags"""
+    validator = create_data_validator()
+    return validator.validate_and_clean(df, 'advancetags', 'metadata')
