@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>AI Agent Operational Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="ai-agent-container">
+        <h1>AI Agent Operational Dashboard</h1>
+        <p>Ask natural language questions about platform health, performance, and metrics</p>
+        
+        <!-- Natural Language Query Interface (PDF Core Concept) -->
+        <div class="query-section">
+            <textarea id="queryInput" placeholder="Ask me anything... e.g., 'What is causing buffering in the Mumbai region?' or 'Why did video start failures increase in the last hour?'"></textarea>
+            <button onclick="submitQuery()">Ask AI Agent</button>
+        </div>
+        
+        <!-- Response Display (PDF Visual Response Rendering) -->
+        <div id="responseSection" style="display: none;">
+            <h3>AI Response</h3>
+            <div id="textResponse"></div>
+            <div id="chartContainer"></div>
+            <div id="dataTable"></div>
+            <div id="recommendationsSection"></div>
+        </div>
+        
+        <!-- Proactive Alerts (PDF Requirement) -->
+        <div id="proactiveInsights">
+            <h3>Proactive Insights</h3>
+            <div id="insightsList"></div>
+        </div>
+        
+        <!-- Context Memory (PDF Follow-up Context requirement) -->
+        <div id="conversationHistory">
+            <h3>Conversation History</h3>
+            <div id="historyList"></div>
+        </div>
+    </div>
+
+    <script>
+        // Natural Language Query Submission
+        function submitQuery() {
+            const query = document.getElementById('queryInput').value.trim();
+            if (!query) return;
+            
+            // Add to conversation history (PDF Follow-up Context)
+            addToHistory('User', query);
+            
+            fetch('/api/ai-agent/query/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: `query=${encodeURIComponent(query)}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    displayResponse(data.response);
+                    addToHistory('AI Agent', data.response.root_cause || data.response.summary);
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        }
+        
+        // Display AI Response (PDF Visual Response Rendering)
+        function displayResponse(response) {
+            document.getElementById('responseSection').style.display = 'block';
+            
+            // Text Answer (PDF requirement)
+            const textDiv = document.getElementById('textResponse');
+            if (response.type === 'diagnostic') {
+                textDiv.innerHTML = `
+                    <h4>Diagnosis: ${response.root_cause}</h4>
+                    <p><strong>Confidence:</strong> ${(response.confidence * 100).toFixed(0)}%</p>
+                    <p><strong>Evidence:</strong> ${response.evidence.join(', ')}</p>
+                    <p><strong>How was this determined?</strong> ${response.explainability}</p>
+                `;
+            }
+            
+            // Recommendations
+            if (response.recommendations) {
+                const recDiv = document.getElementById('recommendationsSection');
+                recDiv.innerHTML = '<h4>Recommendations:</h4><ul>' + 
+                    response.recommendations.map(rec => `<li>${rec}</li>`).join('') + '</ul>';
+            }
+            
+            // Auto-generate charts for trend questions (PDF requirement)
+            if (response.visualizations) {
+                generateCharts(response.visualizations);
+            }
+        }
+        
+        // Generate Interactive Charts (PDF requirement)
+        function generateCharts(visualizations) {
+            const container = document.getElementById('chartContainer');
+            container.innerHTML = '<h4>Visualizations</h4>';
+            
+            visualizations.forEach((viz, index) => {
+                const canvas = document.createElement('canvas');
+                canvas.id = `chart${index}`;
+                canvas.width = 400;
+                canvas.height = 200;
+                container.appendChild(canvas);
+                
+                // Create sample chart based on visualization type
+                if (viz.type === 'time_series') {
+                    createTimeSeriesChart(canvas.id, viz.title);
+                } else if (viz.type === 'bar_chart') {
+                    createBarChart(canvas.id, viz.title);
+                }
+            });
+        }
+        
+        // Load Proactive Insights (PDF Proactive Alerts requirement)
+        function loadProactiveInsights() {
+            fetch('/api/ai-agent/proactive-insights/')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const insightsList = document.getElementById('insightsList');
+                        insightsList.innerHTML = data.insights.map(insight => `
+                            <div class="insight ${insight.severity}">
+                                <strong>${insight.metric}:</strong> ${insight.recommendation}
+                                <small>(${insight.timestamp})</small>
+                            </div>
+                        `).join('');
+                    }
+                });
+        }
+        
+        // Conversation History Management (PDF Follow-up Context)
+        function addToHistory(sender, message) {
+            const historyList = document.getElementById('historyList');
+            const historyItem = document.createElement('div');
+            historyItem.className = 'history-item';
+            historyItem.innerHTML = `<strong>${sender}:</strong> ${message}`;
+            historyList.appendChild(historyItem);
+        }
+        
+        // Helper functions
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+        
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            loadProactiveInsights();
+            
+            // Refresh proactive insights every 5 minutes
+            setInterval(loadProactiveInsights, 5 * 60 * 1000);
+        });
+    </script>
+    
+    <style>
+        .ai-agent-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .query-section { margin-bottom: 30px; }
+        #queryInput { width: 100%; height: 80px; margin-bottom: 10px; }
+        .insight.high { border-left: 4px solid #ff4444; padding: 10px; margin: 5px 0; }
+        .insight.medium { border-left: 4px solid #ffaa44; padding: 10px; margin: 5px 0; }
+        .history-item { padding: 8px; border-bottom: 1px solid #eee; }
+    </style>
+</body>
+</html>
