@@ -1,4 +1,5 @@
 {% extends "tg/base.html" %}
+{% load url_extras %}
 {% block title %}Tickets | TG Dashboard{% endblock %}
 
 {% block content %}
@@ -6,28 +7,28 @@
     <div class="col-12">
         <div class="page-header text-center">
             <h1><i class="bi bi-ticket-perforated me-2"></i>Ticket Management</h1>
-            <p class="lead">Monitor and manage all generated tickets</p>
+            <p class="lead">Monitor and manage all generated tickets with real-time data</p>
         </div>
     </div>
 </div>
 
-<!-- Filters and Search -->
+<!-- FIXED: Search and Filters with proper IDs -->
 <div class="row mb-4">
     <div class="col-12">
         <div class="card">
             <div class="card-body">
-                <form method="get" class="row g-3">
+                <form id="filterForm" method="get" class="row g-3">
                     <div class="col-md-3">
-                        <label for="search" class="form-label">Search</label>
-                        <div class="input-group">
-                            <span class="input-group-text"><i class="bi bi-search"></i></span>
-                            <input type="text" class="form-control" id="search" name="search" 
-                                   value="{{ current_search }}" placeholder="Ticket ID, root cause, channel...">
-                        </div>
+                        <label for="searchInput" class="form-label">
+                            <i class="bi bi-search me-1"></i>Search Tickets
+                        </label>
+                        <input type="text" class="form-control" id="searchInput" name="search" 
+                               value="{{ current_search }}" 
+                               placeholder="Ticket ID, root cause, channel, team...">
                     </div>
                     <div class="col-md-2">
-                        <label for="status" class="form-label">Status</label>
-                        <select class="form-select" id="status" name="status">
+                        <label for="statusFilter" class="form-label">Status</label>
+                        <select class="form-select" id="statusFilter" name="status">
                             <option value="">All Statuses</option>
                             {% for status in status_choices %}
                                 <option value="{{ status }}" {% if status == current_status %}selected{% endif %}>
@@ -37,8 +38,8 @@
                         </select>
                     </div>
                     <div class="col-md-2">
-                        <label for="priority" class="form-label">Priority</label>
-                        <select class="form-select" id="priority" name="priority">
+                        <label for="priorityFilter" class="form-label">Priority</label>
+                        <select class="form-select" id="priorityFilter" name="priority">
                             <option value="">All Priorities</option>
                             {% for priority in priority_choices %}
                                 <option value="{{ priority }}" {% if priority == current_priority %}selected{% endif %}>
@@ -50,10 +51,10 @@
                     <div class="col-md-3">
                         <label class="form-label d-block">&nbsp;</label>
                         <button type="submit" class="btn btn-primary me-2">
-                            <i class="bi bi-funnel me-1"></i>Filter
+                            <i class="bi bi-funnel me-1"></i>Apply Filters
                         </button>
                         <a href="{% url 'tg:ticket_list' %}" class="btn btn-outline-secondary">
-                            <i class="bi bi-x-circle me-1"></i>Clear
+                            <i class="bi bi-x-circle me-1"></i>Clear All
                         </a>
                     </div>
                     <div class="col-md-2">
@@ -68,28 +69,42 @@
     </div>
 </div>
 
-<!-- Tickets Table -->
+<!-- MAIN TICKET TABLE -->
 <div class="row">
     <div class="col-12">
         <div class="card">
             <div class="card-header">
                 <div class="d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="bi bi-list-ul me-2"></i>All Tickets</h5>
-                    <span class="badge bg-primary">{{ tickets|length }} tickets</span>
+                    <h5 class="mb-0">
+                        <i class="bi bi-list-ul me-2"></i>All Tickets
+                        {% if current_search or current_status or current_priority %}
+                            <small class="text-muted">(Filtered)</small>
+                        {% endif %}
+                    </h5>
+                    <div class="d-flex align-items-center gap-3">
+                        <!-- REAL STATISTICS INLINE - NO FAKE DATA -->
+                        {% if total_tickets %}
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle me-1"></i>
+                            {{ open_tickets_count }} open of {{ total_tickets }} total
+                        </small>
+                        {% endif %}
+                        <span class="badge bg-primary">{{ tickets|length }} showing</span>
+                    </div>
                 </div>
             </div>
             <div class="card-body p-0">
                 {% if tickets %}
                     <div class="table-responsive">
                         <table class="table table-hover mb-0">
-                            <thead>
+                            <thead class="table-light">
                                 <tr>
                                     <th style="width: 120px;">Ticket ID</th>
                                     <th style="width: 100px;">Status</th>
                                     <th style="width: 100px;">Priority</th>
                                     <th>Root Cause</th>
                                     <th style="width: 120px;">Channel</th>
-                                    <th style="width: 100px;">Assigned Team</th>
+                                    <th style="width: 120px;">Assigned Team</th>
                                     <th style="width: 120px;">Created</th>
                                     <th style="width: 120px;">Actions</th>
                                 </tr>
@@ -99,28 +114,36 @@
                                 <tr class="ticket-row" data-ticket-id="{{ ticket.ticket_id }}">
                                     <td>
                                         <a href="{% url 'tg:ticket_detail' ticket.ticket_id %}" 
-                                           class="text-decoration-none fw-medium">
+                                           class="text-decoration-none fw-medium text-primary">
                                             {{ ticket.ticket_id }}
                                         </a>
                                     </td>
                                     <td>
-                                        <span class="badge status-{{ ticket.status }}">
+                                        <span class="badge status-{{ ticket.status }} fs-6">
                                             {{ ticket.status|title }}
                                         </span>
                                     </td>
                                     <td>
-                                        <span class="badge priority-{{ ticket.priority }}">
+                                        <span class="badge priority-{{ ticket.priority }} fs-6">
                                             {{ ticket.priority|title }}
                                         </span>
                                     </td>
                                     <td>
-                                        <span class="text-truncate d-inline-block" style="max-width: 200px;" 
-                                              title="{{ ticket.root_cause|default:'N/A' }}">
-                                            {{ ticket.root_cause|default:"N/A" }}
+                                        {% if ticket.root_cause %}
+                                        <span class="text-truncate d-inline-block" style="max-width: 250px;" 
+                                              title="{{ ticket.root_cause }}">
+                                            {{ ticket.root_cause }}
                                         </span>
+                                        {% else %}
+                                        <span class="text-muted fst-italic">Not identified</span>
+                                        {% endif %}
                                     </td>
                                     <td>
-                                        <span class="text-muted">{{ ticket.channel|default:"—" }}</span>
+                                        {% if ticket.channel %}
+                                        <span class="text-muted">{{ ticket.channel }}</span>
+                                        {% else %}
+                                        <span class="text-muted fst-italic">—</span>
+                                        {% endif %}
                                     </td>
                                     <td>
                                         {% if ticket.assign_team %}
@@ -139,7 +162,7 @@
                                                 <i class="bi bi-eye"></i>
                                             </a>
                                             <a href="{% url 'tg:update_ticket_status' ticket.ticket_id %}" 
-                                               class="btn btn-outline-warning" title="Update">
+                                               class="btn btn-outline-warning" title="Update Status">
                                                 <i class="bi bi-pencil"></i>
                                             </a>
                                         </div>
@@ -150,6 +173,7 @@
                         </table>
                     </div>
                 {% else %}
+                    <!-- NO TICKETS STATE -->
                     <div class="text-center py-5">
                         <i class="bi bi-inbox text-muted" style="font-size: 4rem;"></i>
                         <h4 class="text-muted mt-3">No Tickets Found</h4>
@@ -167,117 +191,164 @@
                     </div>
                 {% endif %}
             </div>
+            
+            <!-- COMPLETE PAGINATION - FIXED -->
+            {% if tickets.has_other_pages or total_count > 25 %}
+            <div class="card-footer bg-light">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <div class="d-flex align-items-center gap-3">
+                            {% if tickets.has_other_pages %}
+                            <small class="text-muted">
+                                Showing {{ tickets.start_index }}-{{ tickets.end_index }} of {{ total_count }} tickets
+                            </small>
+                            {% else %}
+                            <small class="text-muted">
+                                Showing all {{ total_count }} tickets
+                            </small>
+                            {% endif %}
+                            <!-- Page size selector -->
+                            <div class="d-flex align-items-center">
+                                <small class="text-muted me-2">Per page:</small>
+                                <select class="form-select form-select-sm" style="width: auto;" onchange="changePageSize(this.value)">
+                                    <option value="25" {% if request.GET.per_page == '25' or not request.GET.per_page %}selected{% endif %}>25</option>
+                                    <option value="50" {% if request.GET.per_page == '50' %}selected{% endif %}>50</option>
+                                    <option value="100" {% if request.GET.per_page == '100' %}selected{% endif %}>100</option>
+                                    <option value="all" {% if request.GET.per_page == 'all' %}selected{% endif %}>All</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    {% if tickets.has_other_pages %}
+                    <div class="col-md-4">
+                        <nav aria-label="Tickets pagination">
+                            <ul class="pagination pagination-sm justify-content-end mb-0">
+                                <!-- First/Previous -->
+                                {% if tickets.has_previous %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?{% url_replace request 'page' 1 %}" title="First page">
+                                            <i class="bi bi-chevron-double-left"></i>
+                                        </a>
+                                    </li>
+                                    <li class="page-item">
+                                        <a class="page-link" href="?{% url_replace request 'page' tickets.previous_page_number %}" title="Previous page">
+                                            <i class="bi bi-chevron-left"></i>
+                                        </a>
+                                    </li>
+                                {% endif %}
+                                
+                                <!-- Current page -->
+                                <li class="page-item active">
+                                    <span class="page-link">{{ tickets.number }}</span>
+                                </li>
+                                
+                                <!-- Next/Last -->
+                                {% if tickets.has_next %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="?{% url_replace request 'page' tickets.next_page_number %}" title="Next page">
+                                            <i class="bi bi-chevron-right"></i>
+                                        </a>
+                                    </li>
+                                    <li class="page-item">
+                                        <a class="page-link" href="?{% url_replace request 'page' tickets.paginator.num_pages %}" title="Last page">
+                                            <i class="bi bi-chevron-double-right"></i>
+                                        </a>
+                                    </li>
+                                {% endif %}
+                            </ul>
+                        </nav>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
 
-<!-- Quick Stats Cards -->
-{% if tickets %}
-<div class="row mt-4">
-    <div class="col-md-3 mb-3">
-        <div class="card bg-light border-0">
-            <div class="card-body text-center">
-                <i class="bi bi-exclamation-triangle text-warning" style="font-size: 2rem;"></i>
-                <h6 class="mt-2 mb-1">Open Tickets</h6>
-                <h4 class="text-warning">{{ tickets|length }}</h4>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3 mb-3">
-        <div class="card bg-light border-0">
-            <div class="card-body text-center">
-                <i class="bi bi-fire text-danger" style="font-size: 2rem;"></i>
-                <h6 class="mt-2 mb-1">High Priority</h6>
-                <h4 class="text-danger">
-                    {{ tickets|length }}
-                </h4>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3 mb-3">
-        <div class="card bg-light border-0">
-            <div class="card-body text-center">
-                <i class="bi bi-people text-info" style="font-size: 2rem;"></i>
-                <h6 class="mt-2 mb-1">Teams Involved</h6>
-                <h4 class="text-info">
-                    {% regroup tickets by assign_team as team_list %}
-                    {{ team_list|length }}
-                </h4>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3 mb-3">
-        <div class="card bg-light border-0">
-            <div class="card-body text-center">
-                <i class="bi bi-clock text-secondary" style="font-size: 2rem;"></i>
-                <h6 class="mt-2 mb-1">Avg Response</h6>
-                <h4 class="text-secondary">< 1h</h4>
-            </div>
-        </div>
-    </div>
-</div>
-{% endif %}
+<!-- REMOVED: All fake stats boxes that showed misleading data -->
+<!-- This keeps the interface clean and focused on the actual ticket data -->
+
 {% endblock %}
 
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Auto-submit form on filter change
-    const statusSelect = document.getElementById('status');
-    const prioritySelect = document.getElementById('priority');
-
-    if (statusSelect) {
-        statusSelect.addEventListener('change', function() {
-            this.form.submit();
+    // FIXED: All element IDs match the HTML
+    const form = document.getElementById('filterForm');
+    if (!form) {
+        console.error('Filter form not found');
+        return;
+    }
+    
+    // Auto-submit on filter changes
+    const statusFilter = document.getElementById('statusFilter');
+    const priorityFilter = document.getElementById('priorityFilter');
+    
+    if (statusFilter) {
+        statusFilter.addEventListener('change', function() {
+            console.log('Status filter changed:', this.value);
+            form.submit();
         });
     }
-
-    if (prioritySelect) {
-        prioritySelect.addEventListener('change', function() {
-            this.form.submit();
+    
+    if (priorityFilter) {
+        priorityFilter.addEventListener('change', function() {
+            console.log('Priority filter changed:', this.value);
+            form.submit();
         });
     }
-
-    // Search form enhancement
-    const searchInput = document.getElementById('search');
+    
+    // Search with debounce to avoid too many requests
+    const searchInput = document.getElementById('searchInput');
     if (searchInput) {
-        searchInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                this.form.submit();
-            }
+        let searchTimeout;
+        searchInput.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                console.log('Search triggered:', this.value);
+                form.submit();
+            }, 800);
         });
-
-        // Clear search button
-        if (searchInput.value) {
-            const clearBtn = document.createElement('button');
-            clearBtn.type = 'button';
-            clearBtn.className = 'btn btn-outline-secondary btn-sm ms-2';
-            clearBtn.innerHTML = '<i class="bi bi-x"></i>';
-            clearBtn.onclick = function() {
-                searchInput.value = '';
-                searchInput.form.submit();
-            };
-            searchInput.parentNode.appendChild(clearBtn);
-        }
     }
-
-    // Row click handling
-    const ticketRows = document.querySelectorAll('.ticket-row');
-    ticketRows.forEach(function(row) {
-        row.addEventListener('click', function(e) {
-            // Don't navigate if clicking on buttons
-            if (e.target.closest('.btn')) return;
-
-            const ticketId = this.dataset.ticketId;
-            if (ticketId) {
-                window.location.href = `/tg/tickets/${ticketId}/`;
-            }
-        });
-
-        // Add hover effect
-        row.style.cursor = 'pointer';
-    });
 });
+
+// Page size change function
+function changePageSize(pageSize) {
+    const url = new URL(window.location.href);
+    if (pageSize === 'all') {
+        url.searchParams.set('per_page', 'all');
+        url.searchParams.delete('page'); // Reset to show all
+    } else {
+        url.searchParams.set('per_page', pageSize);
+        url.searchParams.delete('page'); // Reset to first page when changing page size
+    }
+    window.location.href = url.toString();
+}
+
+// Helper functions for programmatic filtering
+function clearFilters() {
+    const form = document.getElementById('filterForm');
+    if (form) {
+        form.reset();
+        form.submit();
+    }
+}
+
+function filterByStatus(status) {
+    const statusFilter = document.getElementById('statusFilter');
+    if (statusFilter) {
+        statusFilter.value = status;
+        document.getElementById('filterForm').submit();
+    }
+}
+
+function filterByPriority(priority) {
+    const priorityFilter = document.getElementById('priorityFilter');
+    if (priorityFilter) {
+        priorityFilter.value = priority;
+        document.getElementById('filterForm').submit();
+    }
+}
 </script>
 {% endblock %}
