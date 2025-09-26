@@ -2,3 +2,4 @@ django_mongodb_backend
 pandas
 psutil
 openpyxl
+xlrd
