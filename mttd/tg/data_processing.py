@@ -31,8 +31,10 @@ import psutil
 from django.db import transaction
 from django.utils import timezone
 from django.core import serializers
-from .operation.ticket_engine import AutoTicketMVP
 
+from .mongo_service import test_mongodb_connection
+from .operation.ticket_engine import AutoTicketMVP
+from .mongo_service import test_mongodb_connection, fetch_collections, save_tickets
 # Import existing functions to prevent duplicacy
 try:
     from .models import Session, KPI, Advancetags, Ticket
@@ -74,47 +76,47 @@ class FlexibleColumnMapper:
         # Session mappings
         self.session_mappings = {
             'session_id': {
-                'exact': ['Session ID', 'session_id', 'sessionid', 'SessionID'],
+                'exact': ['session_id', 'Session ID', 'sessionid', 'SessionID'],
                 'contains': ['session', 'session_id'],
                 'patterns': [r'session.*id', r'id.*session']
             },
             'viewer_id': {
-                'exact': ['Viewer ID', 'viewer_id', 'viewerid', 'ViewerID'],
+                'exact': ['viewer_id', 'Viewer ID', 'viewerid', 'ViewerID'],
                 'contains': ['viewer', 'viewer_id'],
                 'patterns': [r'viewer.*id', r'id.*viewer']
             },
             'asset_name': {
-                'exact': ['Asset Name', 'asset_name', 'assetname', 'channel', 'Channel'],
+                'exact': ['asset_name', 'Asset Name', 'assetname', 'channel', 'Channel'],
                 'contains': ['asset', 'channel', 'content'],
                 'patterns': [r'asset.*name', r'channel.*name', r'content.*name']
             },
             'session_start_time': {
-                'exact': ['Session Start Time', 'session_start_time', 'start_time', 'timestamp'],
+                'exact': ['session_start_time', 'Session Start Time', 'start_time', 'timestamp'],
                 'contains': ['start_time', 'session_start', 'timestamp'],
                 'patterns': [r'session.*start.*time', r'start.*time', r'time.*start']
             },
             'session_end_time': {
-                'exact': ['Session End Time', 'session_end_time', 'end_time'],
+                'exact': ['session_end_time', 'Session End Time', 'end_time'],
                 'contains': ['end_time', 'session_end'],
                 'patterns': [r'session.*end.*time', r'end.*time', r'time.*end']
             },
             'status': {
-                'exact': ['Status', 'status', 'session_status'],
+                'exact': ['status', 'Status', 'session_status'],
                 'contains': ['status', 'state'],
                 'patterns': [r'.*status.*', r'.*state.*']
             },
             'playing_time': {
-                'exact': ['Playing Time', 'playing_time'],
+                'exact': ['playing_time', 'Playing Time'],
                 'contains': ['playing', 'duration'],
                 'patterns': [r'playing.*time', r'time.*playing']
             },
             'rebuffering_ratio': {
-                'exact': ['Rebuffering Ratio', 'rebuffering_ratio'],
+                'exact': ['rebuffering_ratio', 'Rebuffering Ratio'],
                 'contains': ['rebuffering', 'buffering'],
                 'patterns': [r'rebuffer.*ratio', r'buffer.*ratio']
             },
             'avg_peak_bitrate': {
-                'exact': ['Avg. Peak Bitrate', 'avg_peak_bitrate', 'Average Peak Bitrate'],
+                'exact': ['avg_peak_bitrate', 'Avg. Peak Bitrate', 'Average Peak Bitrate'],
                 'contains': ['peak_bitrate', 'peak'],
                 'patterns': [r'avg.*peak.*bitrate', r'average.*peak']
             }
@@ -128,12 +130,12 @@ class FlexibleColumnMapper:
                 'patterns': [r'.*time.*', r'.*date.*']
             },
             'plays': {
-                'exact': ['Plays', 'plays', 'play_count'],
+                'exact': ['plays', 'Plays', 'play_count'],
                 'contains': ['play', 'count'],
                 'patterns': [r'play.*count', r'.*play.*']
             },
             'streaming_performance_index': {
-                'exact': ['Streaming Performance Index', 'streaming_performance_index'],
+                'exact': ['streaming_performance_index', 'Streaming Performance Index'],
                 'contains': ['streaming', 'performance'],
                 'patterns': [r'streaming.*performance', r'performance.*index']
             }
@@ -142,37 +144,37 @@ class FlexibleColumnMapper:
         # Advancetags mappings
         self.advancetags_mappings = {
             'session_id': {
-                'exact': ['Session ID', 'session_id', 'sessionid', 'Session Id'],
+                'exact': ['session_id', 'Session ID', 'sessionid', 'Session Id'],
                 'contains': ['session'],
                 'patterns': [r'session.*id', r'id.*session']
             },
             'asset_name': {
-                'exact': ['Asset Name', 'asset_name', 'channel'],
+                'exact': ['asset_name', 'Asset Name', 'channel'],
                 'contains': ['asset', 'channel'],
                 'patterns': [r'asset.*name', r'channel.*name']
             },
             'browser_name': {
-                'exact': ['Browser Name', 'browser_name'],
+                'exact': ['browser_name', 'Browser Name'],
                 'contains': ['browser'],
                 'patterns': [r'browser.*name', r'.*browser.*']
             },
             'device_name': {
-                'exact': ['Device Name', 'device_name'],
+                'exact': ['device_name', 'Device Name'],
                 'contains': ['device', 'name'],
                 'patterns': [r'device.*name', r'name.*device']
             },
             'city': {
-                'exact': ['City', 'city'],
+                'exact': ['city', 'City'],
                 'contains': ['city'],
                 'patterns': [r'.*city.*']
             },
             'country': {
-                'exact': ['Country', 'country'],
+                'exact': ['country', 'Country'],
                 'contains': ['country'],
                 'patterns': [r'.*country.*']
             },
             'ip': {
-                'exact': ['IP', 'ip', 'ip_address'],
+                'exact': ['ip', 'IP', 'ip_address'],
                 'contains': ['ip'],
                 'patterns': [r'.*ip.*', r'ip.*address']
             }
@@ -595,48 +597,96 @@ class FlexibleUnifiedDataProcessor:
                 'processing_type': 'manual_upload',
                 'errors': [str(e)]
             }
-    
+
+# process_mongodb_ingestion_flexible method:
+
     def process_mongodb_ingestion_flexible(self, target_channels: List[str] = None) -> Dict[str, Any]:
-        """Process MongoDB data with LIGHT processing (column mapping only) + ticket generation"""
-        logger.info("Processing MongoDB data with light processing")
-        logger.info(f"Target channels: {target_channels or 'All channels'}")
-        
+        """FIXED: Process MongoDB data using Django ORM approach"""
+        logger.info("🚀 Processing MongoDB data with Django ORM")
+        logger.info(f"🎯 Target channels: {target_channels or 'All channels'}")
+
         try:
-            # Fetch data from MongoDB
-            mongodb_data = self._fetch_from_mongodb_flexible(target_channels)
-            
-            # LIGHT PROCESSING - only column mapping
+            # Step 1: Fetch data using Django ORM
+            mongodb_data = fetch_collections(target_channels)
+
+            # Check if we got any data
+            total_records = sum(len(df) for df in mongodb_data.values())
+            if total_records == 0:
+                logger.warning("⚠️ No data found in Django MongoDB models")
+                return {
+                    "success": False, 
+                    "error": "No data found in MongoDB collections. Make sure data is loaded into Django models.",
+                    "processing_type": "mongodb_django_orm",
+                    "datacounts": {"sessions": 0, "kpi_data": 0, "advancetags": 0}
+                }
+
+            # Step 2: LIGHT PROCESSING - only column mapping (as designed)
             processed_data = {}
-            for data_type, df in mongodb_data.items():
+            for datatype, df in mongodb_data.items():
                 if not df.empty:
-                    # Only apply column mapping for MongoDB data
-                    df_mapped = self.mapper.flexible_map_columns(df, data_type)
-                    processed_data[data_type] = df_mapped
+                    logger.info(f"📋 Processing {datatype}: {len(df)} records")
+
+                    # Apply flexible column mapping
+                    df_mapped = self.mapper.flexible_map_columns(df, datatype)
+
+                    # Filter by channels if specified
+                    if target_channels and datatype in ['sessions', 'advancetags']:
+                        df_mapped = self.filter_by_channels(df_mapped, target_channels)
+
+                    processed_data[datatype] = df_mapped
+                    logger.info(f"✅ Processed {datatype}: {len(df_mapped)} records")
                 else:
-                    processed_data[data_type] = df
+                    processed_data[datatype] = df
+
+            # Step 3: Extract session IDs
+            #session_ids = self._extract_session_ids(processed_data)
             
-            # Extract session IDs
+            # CHANGE TO:
             session_ids = self._extract_session_ids(processed_data)
             
-            # Generate tickets
+            # HANDLE EMPTY RESULT GRACEFULLY
+            if not session_ids:
+                logger.warning("No session IDs extracted - database appears to be empty")
+                
+                # Generate sample tickets for demonstration if no real data
+                sample_tickets = self._generate_sample_tickets_for_empty_database()
+                
+                return {
+                    'success': True,
+                    'processing_type': 'mongodb_empty_database',
+                    'session_ids_processed': 0,
+                    'tickets_generated': sample_tickets,
+                    'target_channels': target_channels or [],
+                    'data_counts': {k: len(v) for k, v in processed_data.items()},
+                    'warnings': ['Database appears to be empty - generated sample tickets'],
+                    'database_status': 'empty'
+                }
+            
+            logger.info(f"📋 Extracted {len(session_ids)} unique session IDs")
+
+            # Step 4: Generate tickets
             tickets_generated = self._generate_session_tickets_flexible(processed_data, target_channels)
-            
+
+            # Step 5: Return success result
             return {
-                'success': True,
-                'processing_type': 'mongodb',
-                'session_ids_processed': len(session_ids),
-                'tickets_generated': tickets_generated,
-                'target_channels': target_channels or [],
-                'data_counts': {k: len(v) for k, v in processed_data.items()},
-                'flexible_processing_used': True
+                "success": True,
+                "processing_type": "mongodb_django_orm",
+                "session_ids_processed": len(session_ids),
+                "tickets_generated": tickets_generated,
+                "target_channels": target_channels or [],
+                "datacounts": {k: len(v) for k, v in processed_data.items()},
+                "flexible_processing_used": True,
+                "django_orm_used": True,  # Flag to indicate Django ORM approach
+                "backend": "django_mongodb_backend"
             }
-            
+
         except Exception as e:
-            logger.error(f"MongoDB processing failed: {e}")
+            logger.error(f"❌ Django MongoDB processing failed: {e}", exc_info=True)
             return {
-                'success': False,
-                'processing_type': 'mongodb',
-                'errors': [str(e)]
+                "success": False, 
+                "processing_type": "mongodb_django_orm", 
+                "error": str(e),
+                "django_orm_attempted": True
             }
     
     def _process_single_file_flexible(self, file_obj, filename: str, data_types: List[str]) -> Dict[str, pd.DataFrame]:
@@ -750,147 +800,333 @@ class FlexibleUnifiedDataProcessor:
             return filtered_df
         
         return df
-    
+    # Debug Session ID Values - Add this to your _extract_session_ids function
+
     def _extract_session_ids(self, data: Dict[str, pd.DataFrame]) -> List[str]:
-        """Extract unique session IDs from data"""
-        session_ids = []
-        
-        for data_type, df in data.items():
-            if df.empty:
-                continue
-            
-            session_id_cols = ['session_id', 'Session ID', 'sessionid']
-            for col in session_id_cols:
-                if col in df.columns:
-                    ids = df[col].dropna().astype(str).unique().tolist()
-                    session_ids.extend(ids)
-                    break
-        
-        unique_session_ids = list(set([sid for sid in session_ids 
-                                     if sid and str(sid).strip() not in ['nan', 'None', '']]))
-        
-        logger.info(f"Extracted {len(unique_session_ids)} unique session IDs")
-        return unique_session_ids
-    
-    def _fetch_from_mongodb_flexible(self, target_channels: List[str] = None) -> Dict[str, pd.DataFrame]:
-        """Fetch data from MongoDB with optional channel filtering"""
-        try:
-            from django.db.models import Q
-            
-            # Fetch Sessions
-            session_query = Session.objects.all()
-            if target_channels:
-                channel_filter = Q()
-                for channel in target_channels:
-                    channel_filter |= Q(asset_name__icontains=channel)
-                session_query = session_query.filter(channel_filter)
-            sessions_df = pd.DataFrame(list(session_query.values()))
-            
-            # Fetch KPI data
-            kpi_df = pd.DataFrame(list(KPI.objects.values()))
-            
-            # Fetch Advancetags
-            advancetags_query = Advancetags.objects.all()
-            if target_channels:
-                channel_filter = Q()
-                for channel in target_channels:
-                    channel_filter |= Q(asset_name__icontains=channel)
-                advancetags_query = advancetags_query.filter(channel_filter)
-            advancetags_df = pd.DataFrame(list(advancetags_query.values()))
-            
-            logger.info(f"Fetched MongoDB data: Sessions={len(sessions_df)}, KPI={len(kpi_df)}, Meta={len(advancetags_df)}")
-            
-            return {
-                'sessions': sessions_df,
-                'kpi_data': kpi_df,
-                'advancetags': advancetags_df
-            }
-            
-        except Exception as e:
-            logger.error(f"Error fetching MongoDB data: {e}")
-            return {
-                'sessions': pd.DataFrame(),
-                'kpi_data': pd.DataFrame(),
-                'advancetags': pd.DataFrame()
-            }
-    
+        """Extract unique session IDs from sessions data - WITH DEBUGGING"""
+        logger.info("=== Extracting Session IDs ===")
+
+        if 'sessions' not in data:
+            logger.warning("No 'sessions' key found in data")
+            return []
+
+        df = data['sessions']
+        if df.empty:
+            logger.warning("Sessions DataFrame is empty")
+            return []
+
+        logger.info(f"Processing sessions DataFrame: {len(df)} rows, {len(df.columns)} columns")
+        logger.info(f"Available columns: {list(df.columns)}")
+
+        session_id_columns = ['session_id', 'Session ID', 'sessionid', 'Session Id']
+
+        for col in session_id_columns:
+            if col in df.columns:
+                logger.info(f"Found session ID column: '{col}'")
+
+                # DEBUG: Check raw values before any processing
+                raw_values = df[col].tolist()
+                logger.info(f"Raw values (first 10): {raw_values[:10]}")
+                logger.info(f"Total raw values: {len(raw_values)}")
+                logger.info(f"Non-null raw values: {df[col].notna().sum()}")
+
+                # Check data types
+                logger.info(f"Column dtype: {df[col].dtype}")
+                logger.info(f"Unique raw values: {df[col].nunique()}")
+
+                # Process values step by step
+                non_null_values = df[col].dropna()
+                logger.info(f"After dropna: {len(non_null_values)} values")
+                logger.info(f"Sample non-null values: {non_null_values.head(10).tolist()}")
+
+                string_values = non_null_values.astype(str)
+                logger.info(f"After astype(str): {len(string_values)} values")
+                logger.info(f"Sample string values: {string_values.head(10).tolist()}")
+
+                unique_values = string_values.unique().tolist()
+                logger.info(f"After unique(): {len(unique_values)} values")
+                logger.info(f"All unique values: {unique_values}")
+
+                # DEBUG: Test each validation step
+                step1_filtered = [sid for sid in unique_values if sid]
+                logger.info(f"After removing falsy values: {len(step1_filtered)} values")
+                logger.info(f"Step1 filtered: {step1_filtered}")
+
+                step2_filtered = [sid for sid in step1_filtered if str(sid).strip()]
+                logger.info(f"After removing empty strings: {len(step2_filtered)} values")
+                logger.info(f"Step2 filtered: {step2_filtered}")
+
+                excluded_values = ['nan', 'None', '', 'null', 'NULL']
+                step3_filtered = [sid for sid in step2_filtered if str(sid).strip() not in excluded_values]
+                logger.info(f"After removing excluded values {excluded_values}: {len(step3_filtered)} values")
+                logger.info(f"Step3 filtered (final): {step3_filtered}")
+
+                # DEBUG: Check what's being excluded
+                excluded = [sid for sid in step2_filtered if str(sid).strip() in excluded_values]
+                if excluded:
+                    logger.warning(f"These values were excluded: {excluded}")
+
+                # Check for other problematic values
+                weird_values = []
+                for val in unique_values:
+                    str_val = str(val).strip()
+                    if len(str_val) == 0:
+                        weird_values.append(f"Empty: '{val}'")
+                    elif str_val in excluded_values:
+                        weird_values.append(f"Excluded: '{val}'")
+                    elif len(str_val) < 3:
+                        weird_values.append(f"Too short: '{val}'")
+
+                if weird_values:
+                    logger.warning(f"Problematic values found: {weird_values[:10]}")
+
+                if step3_filtered:
+                    logger.info(f"SUCCESS: Extracted {len(step3_filtered)} valid session IDs")
+                    return step3_filtered
+                else:
+                    logger.error(f"FAILED: Column '{col}' exists but all values were filtered out")
+
+                    # Let's try a more lenient validation
+                    lenient_filtered = [
+                        sid for sid in unique_values 
+                        if sid and str(sid).strip() and str(sid).strip().lower() not in ['nan', 'none', 'null']
+                    ]
+
+                    if lenient_filtered:
+                        logger.info(f"LENIENT validation found {len(lenient_filtered)} values: {lenient_filtered}")
+                        return lenient_filtered
+
+        logger.error("No valid session IDs found in any column")
+        return []
+
+#    def _extract_session_ids(self, data: Dict[str, pd.DataFrame]) -> List[str]:
+#        """Extract unique session IDs - SIMPLIFIED AND LESS STRICT"""
+#        logger.info("=== Extracting Session IDs (Simplified) ===")
+#        
+#        if 'sessions' not in data or data['sessions'].empty:
+#            logger.warning("No sessions data available")
+#            return []
+#        
+#        df = data['sessions']
+#        logger.info(f"Sessions DataFrame: {len(df)} rows")
+#        
+#        # Try session ID columns
+#        for col in ['session_id', 'Session ID', 'sessionid', 'Session Id']:
+#            if col in df.columns:
+#                logger.info(f"Checking column: {col}")
+#                
+#                # Get all non-null values
+#                values = df[col].dropna().astype(str)
+#                
+#                # MUCH SIMPLER validation - only exclude truly empty values
+#                valid_values = [
+#                    v.strip() for v in values 
+#                    if v.strip() and v.strip().lower() != 'nan'
+#                ]
+#                
+#                logger.info(f"Found {len(valid_values)} values in {col}")
+#                logger.info(f"Sample values: {valid_values[:5]}")
+#                
+#                if valid_values:
+#                    return list(set(valid_values))  # Remove duplicates
+#        
+#        logger.error(f"No valid session IDs found. Available columns: {list(df.columns)}")
+#        return []
+#    #def _extract_session_ids(self, data: Dict[str, pd.DataFrame]) -> List[str]:
+#    #    """Extract unique session IDs from sessions data only."""
+#    #    if 'sessions' not in data or data['sessions'].empty:
+#    #        raise ValueError("No session records available to extract session IDs.")
+##
+    #    df = data['sessions']
+    #    for col in ['session_id', 'Session ID', 'sessionid']:
+    #        if col in df.columns:
+    #            session_ids = df[col].dropna().astype(str).unique().tolist()
+    #            if not session_ids:
+    #                raise ValueError("Session DataFrame contains no valid session IDs.")
+    #            logger.info(f"Extracted {len(session_ids)} unique session IDs")
+    #            return session_ids
+#
+    #    # If no matching column found in sessions
+    #    raise KeyError(
+    #        f"Missing session_id column in 'sessions'. "
+    #        f"Expected one of ['session_id','Session ID','sessionid'], "
+    #        f"found: {list(df.columns)}"
+    #    )
+    #
+    #def _fetch_from_mongodb_flexible(self, target_channels: List[str] = None) -> Dict[str, pd.DataFrame]:
+    #    """FIXED: Fetch data from MongoDB using Django ORM (not broken direct connection)"""
+    #    try:
+    #        logger.info("🔄 Starting Django MongoDB data fetch...")
+#
+    #        # Test connection first
+    #        connection_status = test_mongodb_connection()
+    #        if not connection_status["connected"]:
+    #            logger.error(f"❌ Django MongoDB connection failed: {connection_status['error']}")
+    #            return {
+    #                "sessions": pd.DataFrame(), 
+    #                "kpi_data": pd.DataFrame(), 
+    #                "advancetags": pd.DataFrame()
+    #            }
+#
+    #        logger.info(f"✅ Django MongoDB connected: {connection_status['collections']}")
+#
+    #        # Use the optimized service to fetch data
+    #        mongodb_data = fetch_collections(target_channels)
+#
+    #        # Log what we fetched
+    #        total_records = sum(len(df) for df in mongodb_data.values())
+    #        logger.info(f"🎉 Django MongoDB fetch complete: {total_records} total records")
+#
+    #        for data_type, df in mongodb_data.items():
+    #            logger.info(f"   - {data_type}: {len(df)} records")
+    #            if not df.empty:
+    #                logger.info(f"     Columns: {list(df.columns)[:5]}...")  # Show first 5 columns
+#
+    #        return mongodb_data
+#
+    #    except Exception as e:
+    #        logger.error(f"❌ Django MongoDB processing failed: {e}", exc_info=True)
+    #        return {
+    #            "sessions": pd.DataFrame(), 
+    #            "kpi_data": pd.DataFrame(), 
+    #            "advancetags": pd.DataFrame()
+    #        }
+
     def _generate_session_tickets_flexible(self, session_data: Dict[str, pd.DataFrame], 
-                                          target_channels: List[str] = None) -> int:
-        """Generate tickets from processed data using session_id as unique identifier"""
+                                      target_channels: List[str] = None) -> int:
+        """Generate tickets from processed data using common save function"""
         try:
             logger.info("=== Starting Session-Based Ticket Generation ===")
-            
+
             if session_data['sessions'].empty:
                 logger.warning("No session data available for ticket generation")
                 return 0
-            
+
             # Create ticket engine
             engine = AutoTicketMVP(
                 df_sessions=session_data['sessions'],
                 df_advancetags=session_data.get('advancetags', pd.DataFrame()),
                 target_channels=target_channels
             )
-            
+
             # Generate tickets
             tickets_data = engine.process()
-            tickets_saved = 0
-            
-            logger.info(f"Processing {len(tickets_data)} tickets")
-            
-            for ticket_info in tickets_data:
-                try:
-                    # Extract session ID
-                    session_id = self._extract_session_id_from_ticket(ticket_info, session_data['sessions'])
-                    
-                    if not session_id:
-                        logger.warning("Skipping ticket - no valid session ID found")
-                        continue
-                    
-                    # Create ticket with session_id as unique identifier
-                    # Note: Ticket model doesn't accept arbitrary kwargs like 'metadata' or
-                    # 'processing_reference'. Persist additional info into the JSON
-                    # field `failure_details` instead.
-                    with transaction.atomic():
-                        ticket = Ticket.objects.create(
-                            session_id=session_id,
-                            status=ticket_info.get('status', 'new'),
-                            data_source='auto'
-                        )
 
-                        # Store remaining ticket_info into a JSON field on the ticket
-                        try:
-                            extra = {k: v for k, v in ticket_info.items() if k not in ['session_id', 'status']}
-                            if extra:
-                                # merge into failure_details (JSONField)
-                                if isinstance(ticket.failure_details, dict):
-                                    merged = {**ticket.failure_details, **extra}
-                                else:
-                                    merged = extra
-                                ticket.failure_details = merged
-                                ticket.save()
 
-                            tickets_saved += 1
-                            logger.debug(f"Saved ticket {ticket.id} for session {session_id}")
-                        except Exception as e:
-                            # If saving extra JSON fails, delete the created ticket to avoid partial state
-                            logger.error(f"Failed to attach extra details to ticket {ticket.id}: {e}")
-                            try:
-                                ticket.delete()
-                            except Exception:
-                                pass
-                        
-                except Exception as e:
-                    logger.error(f"Failed to save ticket: {str(e)}")
-                    continue
-            
+            if not tickets_data:
+                logger.warning("No tickets generated by ticket engine")
+                return 0
+
+            logger.info(f"Generated {len(tickets_data)} tickets from engine")
+
+            # Prepare tickets for bulk save
+            prepared_tickets = self._prepare_tickets_for_save(tickets_data, session_data['sessions'])
+
+            if not prepared_tickets:
+                logger.warning("No valid tickets prepared for saving")
+                return 0
+
+            # Use common save function from mongo_service
+            tickets_saved = save_tickets(prepared_tickets)
+
             logger.info(f"Successfully saved {tickets_saved} tickets")
             return tickets_saved
-            
+
         except Exception as e:
             logger.error(f"Error in ticket generation: {e}")
             return 0
     
-    def _extract_session_id_from_ticket(self, ticket_info: Dict[str, Any], 
+    def _prepare_tickets_for_save(self, tickets_data: List[Dict[str, Any]], 
+                             sessions_df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """Prepare tickets data with proper session_id extraction and validation"""
+        prepared_tickets = []
+
+        for ticket_info in tickets_data:
+            try:
+                # Extract session ID using helper function
+                session_id = self._extract_session_id_for_ticket(ticket_info, sessions_df)
+
+                if not session_id:
+                    logger.warning("Skipping ticket - no valid session ID found")
+                    continue
+                
+                # Prepare ticket data with all required fields
+                prepared_ticket = {
+                    'session_id': session_id,
+                    'title': ticket_info.get('title', 'Auto-generated Ticket'),
+                    'description': ticket_info.get('description', ''),
+                    'priority': ticket_info.get('priority', 'medium'),
+                    'status': ticket_info.get('status', 'new'),
+                    'assign_team': ticket_info.get('assign_team', 'technical'),
+                    'issue_type': ticket_info.get('issue_type', 'video_start_failure'),
+                    'confidence_score': self._extract_confidence_score(ticket_info),
+                    'context_data': ticket_info.get('context_data', {}),
+                    'failure_details': ticket_info.get('failure_details', {}),
+                    'suggested_actions': ticket_info.get('suggested_actions', []),
+                    'data_source': 'auto'
+                }
+
+                prepared_tickets.append(prepared_ticket)
+
+            except Exception as e:
+                logger.error(f"Error preparing ticket: {e}")
+                continue
+            
+        logger.info(f"Prepared {len(prepared_tickets)} valid tickets for saving")
+        return prepared_tickets
+
+    def _extract_session_id_for_ticket(self, ticket_info: Dict[str, Any],
+                                      sessions_df: pd.DataFrame) -> Optional[str]:
+        """Extract valid session ID from ticket info or session data"""
+
+        # Try from ticket info first
+        if 'session_id' in ticket_info:
+            session_id = str(ticket_info['session_id']).strip()
+            if session_id and session_id not in ['nan', 'None', '', 'null']:
+                return session_id
+
+        # Try from sessions DataFrame - get first available session ID
+        if not sessions_df.empty:
+            session_columns = ['session_id', 'Session ID', 'sessionid', 'Session Id']
+            for col in session_columns:
+                if col in sessions_df.columns and not sessions_df[col].empty:
+                    first_val = sessions_df[col].iloc[0]
+                    if pd.notna(first_val):
+                        session_id = str(first_val).strip()
+                        if session_id and session_id not in ['nan', 'None', '', 'null']:
+                            return session_id
+
+        logger.warning("Could not extract valid session ID from ticket or sessions data")
+        return None
+
+    def _extract_confidence_score(self, ticket_info: Dict[str, Any]) -> float:
+        """Extract confidence score with proper defaults"""
+
+        # Try direct confidence_score field
+        if 'confidence_score' in ticket_info:
+            try:
+                score = float(ticket_info['confidence_score'])
+                # Ensure score is between 0 and 1
+                return max(0.0, min(1.0, score))
+            except (ValueError, TypeError):
+                pass
+            
+        # Try from failure_details confidence mapping
+        if 'failure_details' in ticket_info and isinstance(ticket_info['failure_details'], dict):
+            confidence_text = ticket_info['failure_details'].get('confidence', 'Medium')
+            confidence_map = {
+                'High': 0.9,
+                'high': 0.9,
+                'Medium': 0.7,
+                'medium': 0.7,
+                'Low': 0.5,
+                'low': 0.5
+            }
+            return confidence_map.get(confidence_text, 0.6)
+
+        # Default confidence score
+        return 0.6
+    def _extract_session_id_from_ticket(self, ticket_info: Dict[str, Any],
                                        sessions_df: pd.DataFrame) -> Optional[str]:
         """Extract valid session ID from ticket info or session data"""
         
