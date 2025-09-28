@@ -130,7 +130,7 @@ class Session(BaseModel):
     # Primary identifiers - EXACT NAMES FROM DATASET
     session_id = models.CharField(
         verbose_name="Session ID",
-        max_length=255, unique=True, db_index=True
+        max_length=255, unique=False, db_index=False
     )
     viewer_id = models.CharField(
         verbose_name="Viewer ID",
@@ -416,7 +416,7 @@ class Advancetags(BaseModel):
             models.Index(fields=['cdn', 'device_operating_system']),
             models.Index(fields=['processing_batch']),
         ]
-        verbose_name = "Advanced Tag"
+        verbose_name = "Advanced Tags"
         verbose_name_plural = "Advanced Tags"
 
     def __str__(self):
@@ -497,8 +497,7 @@ class Ticket(BaseModel):
     def save(self, *args, **kwargs):
         """Enhanced save with auto-generation of ticket_id"""
         if not self.ticket_id:
-            timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
-            self.ticket_id = f"TKT_{timestamp}_{str(uuid.uuid4())[:8]}"
+            self.ticket_id = f"TKT_{self.session_id}"
             
         # Set resolved_at when status changes to resolved
         if self.status == 'resolved' and not self.resolved_at:
