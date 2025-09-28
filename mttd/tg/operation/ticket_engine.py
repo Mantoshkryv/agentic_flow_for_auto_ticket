@@ -114,13 +114,14 @@ class AutoTicketMVP:
             try:
                 # Extract SESSION-ID ONLY (no viewer_id as requested)
                 session_id = self._get_field_value(session_row, [
-                    'session_id', 'Session ID', 'sessionid', 'Session Id'
+                    'session_id', 'Session ID', 'Session_id', 'Session Id'
                 ])
+                print(f"[DEBUG] Processing row {i}, session_id = {session_id}")
                 
                 if not session_id:
-                    session_id = f"session-{i+1}"
-                    logger.warning(f"No session_id found for row {i}, using generated: {session_id}")
-                
+                    # Immediately error out for missing ID
+                    raise KeyError(f"No session_id found in row {i}: {dict(session_row)}")
+
                 # Extract channel/asset info - VARIABLE channel names (no hardcoding)
                 channel_name = self._get_field_value(session_row, [
                     'asset_name', 'Asset Name', 'channel', 'Channel'
@@ -361,8 +362,8 @@ class AutoTicketMVP:
             ts_str = "Unknown"
         
         # Generate unique ticket ID
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        ticket_id = f"TKT_VSF_{session_id}_{timestamp}"
+        
+        ticket_id = f"TKT_{session_id}"
         
         # Build ticket description in EXACT format as specified
         # SESSION-ID ONLY (no viewer_id as requested)
@@ -401,7 +402,7 @@ class AutoTicketMVP:
             },
             'context_data': {
                 'asset_name': channel,
-                'channel': channel,
+                
                 'failure_time': str(failure_time) if pd.notna(failure_time) else None,
                 'deep_link': f"https://example.com/session/{session_id}"
             },
@@ -409,164 +410,7 @@ class AutoTicketMVP:
             'suggested_actions': self._get_mvp_suggested_actions(diagnosis.root_cause)
         }
 
-    def _generate_synthetic_tickets_from_kpi(self) -> List[Dict[str, Any]]:
-        """
-        Generate synthetic tickets from KPI data when session data unavailable
-        SESSION-ID ONLY approach
-        """
-        tickets = []
-        
-        try:
-            if self.df_kpi.empty:
-                return tickets
-            
-            # Use first row of KPI data
-            kpi_row = self.df_kpi.iloc[0]
-            
-            # Extract failure counts
-            vsf_tech = int(self._get_field_value(kpi_row, [
-                'Video Start Failures Technical', 'video_start_failures_technical'
-            ]) or 0)
-            
-            vsf_biz = int(self._get_field_value(kpi_row, [
-                'Video Start Failures Business', 'video_start_failures_business'
-            ]) or 0)
-            
-            ebvs = int(self._get_field_value(kpi_row, [
-                'Exit Before Video Starts', 'exit_before_video_starts'
-            ]) or 0)
-
-            counter = 1
-            
-            # Generate VSF-T tickets
-            for i in range(vsf_tech):
-                session_id = f"vsf-t-{counter}"
-                channel_name = self.target_channels[0] if self.target_channels else "Channel"
-                
-                diagnosis = Diagnosis(
-                    root_cause="Potential CDN/Manifest Issue",
-                    confidence=0.7,
-                    evidence="Technical failure from KPI data",
-                    assign_team="network"
-                )
-                
-                ticket = self._build_synthetic_ticket(session_id, channel_name, diagnosis)
-                tickets.append(ticket)
-                counter += 1
-
-            # Generate VSF-B tickets  
-            for i in range(vsf_biz):
-                session_id = f"vsf-b-{counter}"
-                channel_name = self.target_channels[0] if self.target_channels else "Channel"
-                
-                diagnosis = Diagnosis(
-                    root_cause="Potential Entitlement/Auth Issue",
-                    confidence=0.7,
-                    evidence="Business failure from KPI data",
-                    assign_team="technical"
-                )
-                
-                ticket = self._build_synthetic_ticket(session_id, channel_name, diagnosis)
-                tickets.append(ticket)
-                counter += 1
-
-            # Generate EBVS tickets
-            for i in range(ebvs):
-                session_id = f"ebvs-{counter}"
-                channel_name = self.target_channels[0] if self.target_channels else "Channel"
-                
-                diagnosis = Diagnosis(
-                    root_cause="Potential Entitlement/Auth Issue",
-                    confidence=0.6,
-                    evidence="User exit before video start from KPI data",
-                    assign_team="technical"
-                )
-                
-                ticket = self._build_synthetic_ticket(session_id, channel_name, diagnosis)
-                tickets.append(ticket)
-                counter += 1
-
-            logger.info(f"Generated {len(tickets)} synthetic tickets from KPI data")
-            return tickets
-
-        except Exception as e:
-            logger.error(f"Error generating synthetic tickets: {e}")
-            return []
-
-    def _build_synthetic_ticket(self, session_id: str, channel: str, diagnosis: Diagnosis) -> Dict[str, Any]:
-        """Build synthetic ticket with SESSION-ID ONLY"""
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        ticket_id = f"TKT_SYN_{session_id}_{timestamp}"
-        ts_str = datetime.now().strftime('%b %d %Y, %H:%M:%S')
-        
-        title = f"[VSF] [{diagnosis.root_cause}] for Session {session_id} on {channel}"
-        
-        description = textwrap.dedent(f"""
-        === NEW FAILURE TICKET ===
-        
-        TITLE: {title}
-        
-        BODY:
-        - Session ID: {session_id}
-        - Impacted Channel: {channel}
-        - Time of Failure: {ts_str}
-        - Auto-Diagnosis: {diagnosis.root_cause} (Confidence: {diagnosis.confidence})
-        - Evidence: {diagnosis.evidence}
-        - Deep Link: https://example.com/session/{session_id}
-        - Assign to: {diagnosis.assign_team}
-        
-        Note: This is a synthetic ticket generated from KPI aggregation data.
-        """).strip()
-        
-        return {
-            'ticket_id': ticket_id,
-            'session_id': session_id,  # SESSION-ID ONLY
-            'title': title,
-            'priority': 'medium',
-            'status': 'new',
-            'assign_team': diagnosis.assign_team,
-            'issue_type': 'video_start_failure',
-            'description': description,
-            'failure_details': {
-                'root_cause': diagnosis.root_cause,
-                'confidence': diagnosis.confidence,
-                'evidence': diagnosis.evidence,
-                'synthetic': True
-            },
-            'context_data': {
-                'asset_name': channel,
-                'channel': channel,
-                'deep_link': f"https://example.com/session/{session_id}",
-                'synthetic': True
-            },
-            'confidence_score': diagnosis.confidence,
-            'suggested_actions': self._get_mvp_suggested_actions(diagnosis.root_cause)
-        }
-
-    def _create_error_ticket(self, error_message: str) -> List[Dict[str, Any]]:
-        """Create error ticket using SESSION-ID ONLY approach"""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        
-        return [{
-            'ticket_id': f"TKT_ERR_{timestamp}",
-            'session_id': f"error-session-{timestamp}",  # SESSION-ID ONLY
-            'title': "[VSF] [System Error] Ticket Generation Failed",
-            'priority': 'medium',
-            'status': 'new',
-            'assign_team': 'technical',
-            'issue_type': 'video_start_failure',
-            'description': f"Ticket generation error: {error_message}",
-            'failure_details': {
-                'root_cause': 'System Error',
-                'confidence': 0.0,
-                'evidence': f"Error: {error_message}",
-                'error': True
-            },
-            'context_data': {'error': error_message},
-            'confidence_score': 0.0,
-            'suggested_actions': ['Check system logs', 'Verify data format', 'Contact system administrator']
-        }]
+    
 
     def _get_mvp_suggested_actions(self, root_cause: str) -> List[str]:
         """Get MVP suggested actions based on root cause"""
@@ -629,10 +473,7 @@ def generate_tickets_for_failures(sessions_df: pd.DataFrame, target_channels: Li
     engine = create_mvp_ticket_engine(sessions_df, target_channels)
     return engine.process()
 
-def generate_synthetic_tickets_from_kpi(kpi_df: pd.DataFrame, target_channels: List[str] = None) -> List[Dict[str, Any]]:
-    """Convenience function to generate synthetic tickets from KPI data - SESSION-ID ONLY"""
-    engine = create_mvp_ticket_engine(pd.DataFrame(), target_channels, kpi_df)
-    return engine.process()
+
 
 def analyze_session_for_failure(session_row: pd.Series) -> bool:
     """Utility function to check if a single session is a failure"""
