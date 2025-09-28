@@ -24,7 +24,10 @@
                         </label>
                         <input type="text" class="form-control" id="searchInput" name="search" 
                                value="{{ current_search }}" 
-                               placeholder="Ticket ID, root cause, channel, team...">
+                               placeholder="Ticket ID, title, description, team...">
+                        <div class="form-text">
+                            <small>Search by: Ticket ID, Title, Description, Session ID, Team, Issue Type</small>
+                        </div>
                     </div>
                     <div class="col-md-2">
                         <label for="statusFilter" class="form-label">Status</label>
@@ -102,9 +105,10 @@
                                     <th style="width: 120px;">Ticket ID</th>
                                     <th style="width: 100px;">Status</th>
                                     <th style="width: 100px;">Priority</th>
-                                    <th>Root Cause</th>
+                                    <th>Issue/Title</th>
                                     <th style="width: 120px;">Channel</th>
                                     <th style="width: 120px;">Assigned Team</th>
+                                    <th style="width: 90px;">Confidence</th>
                                     <th style="width: 120px;">Created</th>
                                     <th style="width: 120px;">Actions</th>
                                 </tr>
@@ -128,28 +132,59 @@
                                             {{ ticket.priority|title }}
                                         </span>
                                     </td>
+                                    <!-- FIXED: Display title, description, or issue_type -->
                                     <td>
-                                        {% if ticket.root_cause %}
+                                        {% if ticket.title %}
                                         <span class="text-truncate d-inline-block" style="max-width: 250px;" 
-                                              title="{{ ticket.root_cause }}">
-                                            {{ ticket.root_cause }}
+                                              title="{{ ticket.title }}">
+                                            <strong>{{ ticket.title }}</strong>
+                                        </span>
+                                        {% elif ticket.description %}
+                                        <span class="text-truncate d-inline-block" style="max-width: 250px;" 
+                                              title="{{ ticket.description }}">
+                                            {{ ticket.description }}
+                                        </span>
+                                        {% elif ticket.issue_type %}
+                                        <span class="text-truncate d-inline-block" style="max-width: 250px;" 
+                                              title="{{ ticket.issue_type }}">
+                                            <em>{{ ticket.issue_type }}</em>
                                         </span>
                                         {% else %}
-                                        <span class="text-muted fst-italic">Not identified</span>
+                                        <span class="text-muted fst-italic">Not specified</span>
                                         {% endif %}
                                     </td>
+                                    <!-- FIXED: Extract channel from context_data or session -->
                                     <td>
-                                        {% if ticket.channel %}
-                                        <span class="text-muted">{{ ticket.channel }}</span>
+                                        {% if ticket.context_data.asset_name %}
+                                            <span class="badge bg-secondary">{{ ticket.context_data.asset_name }}</span>
+                                        {% elif ticket.context_data.channel %}
+                                            <span class="badge bg-secondary">{{ ticket.context_data.channel }}</span>
+                                        {% elif ticket.context_data.channel_name %}
+                                            <span class="badge bg-secondary">{{ ticket.context_data.channel_name }}</span>
                                         {% else %}
-                                        <span class="text-muted fst-italic">—</span>
+                                            <span class="text-muted fst-italic">—</span>
                                         {% endif %}
                                     </td>
+                                    
                                     <td>
                                         {% if ticket.assign_team %}
                                             <span class="badge bg-info">{{ ticket.assign_team }}</span>
                                         {% else %}
                                             <span class="text-muted">Unassigned</span>
+                                        {% endif %}
+                                    </td>
+                                    <!-- FIXED: Display confidence score -->
+                                    <td>
+                                        {% if ticket.confidence_score %}
+                                            {% if ticket.confidence_score >= 0.8 %}
+                                                <span class="badge bg-success text-white">{{ ticket.confidence_score|floatformat:2 }}</span>
+                                            {% elif ticket.confidence_score >= 0.5 %}
+                                                <span class="badge bg-warning text-dark">{{ ticket.confidence_score|floatformat:2 }}</span>
+                                            {% else %}
+                                                <span class="badge bg-danger text-white">{{ ticket.confidence_score|floatformat:2 }}</span>
+                                            {% endif %}
+                                        {% else %}
+                                            <span class="text-muted">—</span>
                                         {% endif %}
                                     </td>
                                     <td>
@@ -265,10 +300,6 @@
         </div>
     </div>
 </div>
-
-<!-- REMOVED: All fake stats boxes that showed misleading data -->
-<!-- This keeps the interface clean and focused on the actual ticket data -->
-
 {% endblock %}
 
 {% block extra_js %}
