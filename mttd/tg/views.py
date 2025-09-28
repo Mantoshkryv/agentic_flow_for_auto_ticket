@@ -23,6 +23,7 @@ from django.utils import timezone
 from django.db.models import Q, Count
 from datetime import datetime, timedelta
 import time
+from .mongo_service import get_mongodb_service, test_mongodb_connection, get_mongodb_stats
 
 def api_data_status(request):
     """API endpoint to check data processing status"""
@@ -42,7 +43,7 @@ def api_data_status(request):
             'status': 'error',
             'message': str(e)
         }, status=500)
-
+ 
 # Import existing functions to prevent duplicacy
 try:
     from .data_processing import create_flexible_processor, process_files_flexible, process_mongodb_flexible
@@ -65,68 +66,159 @@ def tg_home_redirect(request):
     """MAINTAIN existing function - Redirect to dashboard"""
     return redirect("tg:dashboard")
 
+# Update dashboard view to show Django MongoDB status:
+# Replace dashboard_view function in views.py
 def dashboard_view(request):
-    """MAINTAIN existing function - Enhanced dashboard with unified pipeline stats"""
     try:
-        # Use existing utility function to get comprehensive stats
-        stats = UnifiedDataManager.get_data_statistics()
+        # MongoDB status
+        mongodb_status = test_mongodb_connection()
+        mongodb_stats = get_mongodb_stats()
         
-        # Get recent processing activity
-        recent_ingestions = DataIngestionLog.objects.order_by('-started_at')[:10]
+        # REAL ticket statistics
+        total_tickets = Ticket.objects.count()
+        open_tickets = Ticket.objects.exclude(status__in=['resolved', 'closed']).count()
+        high_priority_tickets = Ticket.objects.filter(priority__in=['high', 'critical']).count()
         
-        # Enhanced ticket statistics with session-only focus
-        ticket_stats = Ticket.objects.aggregate(
-            total=Count('id'),
-            new=Count('id', filter=Q(status='new')),
-            in_progress=Count('id', filter=Q(status='in_progress')),
-            resolved=Count('id', filter=Q(status='resolved')),
-            high_priority=Count('id', filter=Q(priority='high')),
-            critical=Count('id', filter=Q(priority='critical')),
-            session_based=Count('id', filter=Q(session_id__isnull=False)),  # SESSION-ONLY tracking
-            high_confidence=Count('id', filter=Q(confidence_score__gte=0.8))
-        )
+        # REAL recent data (24 hours)
+        yesterday = timezone.now() - timedelta(days=1)
+        recent_sessions = Session.objects.filter(created_at__gte=yesterday).count() if Session.objects.filter(created_at__isnull=False).exists() else Session.objects.count()
+        recent_kpis = KPI.objects.count()  # KPI table may not have created_at
+        recent_metadata = Advancetags.objects.count()  # Advancetags table may not have created_at
         
-        # Processing performance metrics
-        processing_metrics = {
-            'total_batches': DataIngestionLog.objects.count(),
-            'successful_batches': DataIngestionLog.objects.filter(status='success').count(),
-            'failed_batches': DataIngestionLog.objects.filter(status='failed').count(),
-            'avg_processing_time': _calculate_avg_processing_time(),
-            'recent_success_rate': _calculate_recent_success_rate()
-        }
+        # REAL chart data for frontend
+        import json
+        from django.db.models import Count
+        
+        status_distribution = list(Ticket.objects.values('status').annotate(count=Count('id')))
+        priority_distribution = list(Ticket.objects.values('priority').annotate(count=Count('id')))
+        
+        # Weekly trend data
+        weekly_tickets = []
+        for i in range(7):
+            date = (timezone.now() - timedelta(days=6-i)).date()
+            count = Ticket.objects.filter(created_at__date=date).count()
+            weekly_tickets.append({'date': date.strftime('%m/%d'), 'count': count})
+        
+        # Recent tickets
+        recent_tickets = Ticket.objects.order_by('-created_at')[:10]
         
         context = {
-            'stats': stats,
-            'ticket_stats': ticket_stats,
-            'processing_metrics': processing_metrics,
-            'recent_ingestions': recent_ingestions,
-            'can_ingest_mongodb': True,
-            'can_upload_files': True,
-            'session_only_mode': True,  # Indicate SESSION-ONLY mode
-            'flexible_processing': True,  # Indicate flexible processing available
+            # REAL DATA matching template variable names
+            'total_tickets': total_tickets,
+            'open_tickets': open_tickets,
+            'high_priority_tickets': high_priority_tickets,
+            'recent_sessions': recent_sessions,
+            'recent_kpis': recent_kpis,  
+            'recent_metadata': recent_metadata,
+            
+            # REAL chart data (JSON serialized for JavaScript)
+            'status_distribution': json.dumps(status_distribution),
+            'priority_distribution': json.dumps(priority_distribution),
+            'weekly_tickets': json.dumps(weekly_tickets),
+            
+            # REAL tickets list
+            'recent_tickets': recent_tickets,
+            
+            # MongoDB integration
+            'mongodb_connected': mongodb_status["connected"],
+            'mongodb_status': mongodb_status,
+            'mongodb_stats': mongodb_stats,
+            
+            # System capabilities
+            'session_only_mode': True,
+            'flexible_processing': True,
         }
         
         return render(request, "tg/dashboard.html", context)
         
     except Exception as e:
         logger.error(f"Dashboard error: {e}", exc_info=True)
-        messages.error(request, f"Dashboard loading error: {str(e)}")
-        
-        # Fallback context
-        context = {
-            'stats': {
-                'sessions': {'total': 0}, 
-                'tickets': {'total': 0},
-                'kpi': {'total': 0},
-                'advancetags': {'total': 0}
-            },
-            'recent_ingestions': [],
+        # Return minimal context on error
+        return render(request, "tg/dashboard.html", {
+            'total_tickets': 0,
+            'open_tickets': 0, 
+            'high_priority_tickets': 0,
+            'recent_sessions': 0,
+            'recent_kpis': 0,
+            'recent_metadata': 0,
+            'recent_tickets': [],
+            'mongodb_connected': False,
             'error': str(e)
-        }
-        return render(request, "tg/dashboard.html", context)
-
-# ============================================================================
-# ENHANCED FILE UPLOAD PROCESSING - MAINTAIN EXISTING FUNCTION NAME
+        })
+    
+#def dashboard_view(request):
+#    """FIXED: Dashboard with Django MongoDB integration"""
+#    try:
+#        # Test Django MongoDB connection  
+#        mongodb_status = test_mongodb_connection()
+#        mongodb_stats = get_mongodb_stats()
+#        
+#        # Get Django model stats
+#        stats = UnifiedDataManager.get_data_statistics()
+#        
+#        # Merge with MongoDB stats
+#        if mongodb_status["connected"]:
+#            stats["mongodb_collections"] = mongodb_status["collections"]
+#            stats["mongodb_detailed"] = mongodb_stats
+#        
+#        # Get recent processing activity
+#        recent_ingestions = DataIngestionLog.objects.order_by('-started_at')[:10]
+#        
+#        # Enhanced ticket statistics
+#        ticket_stats = Ticket.objects.aggregate(
+#            total=Count('id'),
+#            new=Count('id', filter=Q(status='new')),
+#            in_progress=Count('id', filter=Q(status='in_progress')),
+#            resolved=Count('id', filter=Q(status='resolved')),
+#            high_priority=Count('id', filter=Q(priority='high')),
+#            critical=Count('id', filter=Q(priority='critical')),
+#            session_based=Count('id', filter=Q(session_id__isnull=False)),
+#            high_confidence=Count('id', filter=Q(confidence_score__gte=0.8))
+#        )
+#        
+#        # Processing metrics
+#        processing_metrics = {
+#            "total_batches": DataIngestionLog.objects.count(),
+#            "successful_batches": DataIngestionLog.objects.filter(status='success').count(),
+#            "failed_batches": DataIngestionLog.objects.filter(status='failed').count(),
+#            "avg_processing_time": _calculate_avg_processing_time(),
+#            "recent_success_rate": _calculate_recent_success_rate()
+#        }
+#        
+#        context = {
+#            "stats": stats,
+#            "ticket_stats": ticket_stats,
+#            "processing_metrics": processing_metrics,
+#            "recent_ingestions": recent_ingestions,
+#            "can_ingest_mongodb": mongodb_status["connected"],
+#            "mongodb_connected": mongodb_status["connected"],
+#            "mongodb_status": mongodb_status,
+#            "mongodb_stats": mongodb_stats,
+#            "can_upload_files": True,
+#            "session_only_mode": True,
+#            "flexible_processing": True,
+#            "django_mongodb_backend": True  # Indicate we're using Django MongoDB backend
+#        }
+#        
+#        return render(request, "tg/dashboard.html", context)
+#        
+#    except Exception as e:
+#        logger.error(f"❌ Dashboard error: {e}", exc_info=True)
+#        messages.error(request, f"Dashboard loading error: {str(e)}")
+#        
+#        # Fallback context
+#        mongodb_status = {"connected": False, "error": str(e)}
+#        context = {
+#            "stats": {"sessions": {"total": 0}, "tickets": {"total": 0}, "kpi": {"total": 0}, "advancetags": {"total": 0}},
+#            "recent_ingestions": [],
+#            "mongodb_connected": False,
+#            "mongodb_status": mongodb_status,
+#            "error": str(e)
+#        }
+#        return render(request, "tg/dashboard.html", context)
+#
+## ============================================================================
+## ENHANCED FILE UPLOAD PROCESSING - MAINTAIN EXISTING FUNCTION NAME
 # ============================================================================
 
 @csrf_exempt
@@ -274,88 +366,156 @@ def process_files_flexible_enhanced(files_mapping, target_channels=None, process
 # MONGODB INGESTION - MAINTAIN EXISTING FUNCTION NAME
 # ============================================================================
 
-@csrf_exempt
+@csrf_exempt  
 def mongodb_ingestion_view(request):
-    """MAINTAIN existing function name - Enhanced with flexible pipeline"""
+    """FIXED: MongoDB ingestion using Django ORM (best approach with django_mongodb_backend)"""
+    
     if request.method == "POST":
         start_time = time.time()
-        
         try:
-            logger.info("Starting flexible MongoDB ingestion processing")
+            logger.info("🚀 Starting Django MongoDB processing")
             
-            # Get optional target channels from request (VARIABLE channels)
+            # Get optional target channels
             target_channels_str = request.POST.get('target_channels', '')
             target_channels = []
             if target_channels_str:
                 target_channels = [ch.strip() for ch in target_channels_str.split(',') if ch.strip()]
             
-            logger.info(f"Target channels for MongoDB ingestion: {target_channels or 'All channels'}")
+            logger.info(f"🎯 Target channels: {target_channels or 'All channels'}")
             
-            # Process using enhanced MongoDB pipeline with SESSION-ONLY tickets
+            # Test Django MongoDB connection
+            connection_status = test_mongodb_connection()
+            if not connection_status["connected"]:
+                error_msg = f"Django MongoDB connection failed: {connection_status['error']}"
+                messages.error(request, error_msg)
+                logger.error(error_msg)
+                return redirect('tg:mongodb_ingestion')
+            
+            logger.info(f"✅ Django MongoDB verified: {connection_status['collections']}")
+            
+            # Check if we have data to process
+            total_available = sum(connection_status["collections"].values())
+            if total_available == 0:
+                error_msg = "No data found in MongoDB collections. Please ensure data is loaded into your Django models."
+                messages.warning(request, error_msg)
+                logger.warning(error_msg)
+                return redirect('tg:mongodb_ingestion')
+            
+            # Process using Django ORM approach
             result = process_mongodb_flexible_enhanced(target_channels)
-            
-            # Handle result - MAINTAIN existing structure
+
             if result.get('success', False):
                 success_msg = build_mongodb_success_message(result)
                 messages.success(request, success_msg)
-                logger.info("Flexible MongoDB ingestion successful")
+                logger.info("🎉 Django MongoDB processing successful")
             else:
-                error_msg = f"MongoDB ingestion failed: {'; '.join(result.get('errors', ['Unknown error']))}"
+                error_msg = f"MongoDB processing failed: {result.get('error', 'Unknown error')}"
                 messages.error(request, error_msg)
-                logger.error("Flexible MongoDB ingestion failed")
+                logger.error("❌ Django MongoDB processing failed")
             
-            return redirect("tg:dashboard")
+            return redirect('tg:dashboard')
             
         except Exception as e:
             processing_time = time.time() - start_time
-            error_msg = f"MongoDB ingestion failed: {str(e)} (after {processing_time:.1f}s)"
+            error_msg = f"MongoDB processing failed: {str(e)} (after {processing_time:.1f}s)"
             messages.error(request, error_msg)
-            logger.error(f"MongoDB ingestion exception: {e}", exc_info=True)
+            logger.error(f"❌ MongoDB processing exception: {e}", exc_info=True)
     
-    # Get current data counts for display using existing function
+    # GET request - show form with REAL data counts
     try:
-        stats = UnifiedDataManager.get_data_statistics()
+        # Get real collection counts using Django ORM
+        mongodb_stats = get_mongodb_stats()
+        connection_status = test_mongodb_connection()
+        
+        if connection_status["connected"]:
+            session_count = mongodb_stats.get("sessions", {}).get("total", 0)
+            kpi_count = mongodb_stats.get("kpi", {}).get("total", 0)  
+            metadata_count = mongodb_stats.get("advancetags", {}).get("total", 0)
+            mongodb_connected = True
+            
+            logger.info(f"📊 Real MongoDB counts: Sessions={session_count}, KPI={kpi_count}, Meta={metadata_count}")
+        else:
+            session_count = kpi_count = metadata_count = 0
+            mongodb_connected = False
+            logger.warning(f"❌ Django MongoDB not connected: {connection_status.get('error', 'Unknown error')}")
+        
+        # Get recent processing logs
+        recent_ingestions = DataIngestionLog.objects.filter(
+            source_type='mongodb'
+        ).order_by('-started_at')[:8]
         
         context = {
-            'stats': stats,
-            'recent_ingestions': DataIngestionLog.objects.filter(
-                source_type='mongodb'
-            ).order_by('-started_at')[:8],
-            'mongodb_features': [
-                'SESSION-ID ONLY ticket generation',
-                'Variable channel filtering',
-                'Flexible data processing',
-                'MVP diagnosis rules',
-                'Batch processing tracking'
+            "session_count": session_count,
+            "kpi_count": kpi_count,
+            "metadata_count": metadata_count,
+            "mongodb_connected": mongodb_connected,
+            "connection_status": connection_status,
+            "mongodb_stats": mongodb_stats,
+            "recent_ingestions": recent_ingestions,
+            "mongodb_features": [
+                "Django ORM MongoDB integration",
+                "django_mongodb_backend compatibility", 
+                "SESSION-ID ONLY ticket generation",
+                "Variable channel filtering",
+                "Flexible data processing",
+                "Real collection statistics",
+                "Enhanced error handling"
             ]
         }
+        
+        return render(request, "tg/mongodb_ingestion.html", context)
+        
     except Exception as e:
-        logger.error(f"Error loading MongoDB ingestion context: {e}")
-        context = {'error': str(e)}
-    
-    return render(request, "tg/mongodb_ingestion.html", context)
+        logger.error(f"❌ Error loading MongoDB page: {e}")
+        context = {
+            "error": str(e),
+            "session_count": 0,
+            "kpi_count": 0,
+            "metadata_count": 0,
+            "mongodb_connected": False
+        }
+        return render(request, "tg/mongodb_ingestion.html", context)
+
+# Replace process_mongodb_flexible_enhanced function:
 
 def process_mongodb_flexible_enhanced(target_channels=None):
-    """
-    Enhanced MongoDB processing with flexible pipeline
-    Uses imported functions to prevent duplicacy
-    """
+    """FIXED: Enhanced MongoDB processing using Django ORM"""
     try:
-        # Use existing flexible MongoDB processing
+        logger.info("🔄 Enhanced Django MongoDB processing starting...")
+        
+        # Test connection first
+        connection_status = test_mongodb_connection()
+        if not connection_status["connected"]:
+            logger.error(f"❌ Django MongoDB connection failed: {connection_status['error']}")
+            return {
+                "success": False, 
+                "error": f"Django MongoDB connection failed: {connection_status['error']}",
+                "django_orm_attempted": True
+            }
+        
+        logger.info("✅ Django MongoDB connection verified")
+        
+        # Use the flexible processor with Django ORM
         result = process_mongodb_flexible(target_channels)
         
-        # Add enhanced information
         if result.get('success'):
-            result['session_only_processing'] = True
+            # Add enhanced information
+            result['django_orm_processing'] = True
             result['flexible_processing_used'] = True
-            
+            result['connection_verified'] = True
+            result['backend'] = 'django_mongodb_backend'
+            logger.info(f"🎉 Django MongoDB processing successful: {result.get('tickets_generated', 0)} tickets")
+        else:
+            logger.error(f"❌ Django MongoDB processing failed: {result.get('error', 'Unknown error')}")
+        
         return result
         
     except Exception as e:
-        logger.error(f"Enhanced MongoDB processing failed: {e}")
+        logger.error(f"❌ Enhanced Django MongoDB processing failed: {e}", exc_info=True)
         return {
-            'success': False,
-            'errors': [str(e)]
+            "success": False, 
+            "error": str(e),
+            "django_orm_attempted": True
         }
 
 # ============================================================================
@@ -363,14 +523,10 @@ def process_mongodb_flexible_enhanced(target_channels=None):
 # ============================================================================
 
 # CORRECTED ticket_list VIEW FUNCTION
-# This replaces the existing ticket_list function in views.py
-# COMPLETE FIXED VIEWS.PY - REPLACE TICKET_LIST AND UPDATE_TICKET_STATUS FUNCTIONS
-# This fixes ALL identified issues: fake data, filtering, pagination, updating, etc.
-
-# Replace ticket_list function (around lines 365-408) with this:
+# FIXED views.py functions - Replace the existing functions with these
 
 def ticket_list(request):
-    """COMPLETE FIXED ticket list - all issues resolved"""
+    """FIXED ticket list - corrected field references and search"""
     try:
         # Get filter parameters - matching what template expects
         current_search = request.GET.get('search', '').strip()
@@ -386,13 +542,16 @@ def ticket_list(request):
             tickets = tickets.filter(status=current_status)
         if current_priority and current_priority != 'all':
             tickets = tickets.filter(priority=current_priority)
+        
+        # FIXED SEARCH - Use correct field names from your Ticket model
         if current_search:
             tickets = tickets.filter(
                 Q(ticket_id__icontains=current_search) |
-                Q(root_cause__icontains=current_search) |
-                Q(channel__icontains=current_search) |
+                Q(title__icontains=current_search) |           # Use 'title' instead of 'root_cause'
+                Q(description__icontains=current_search) |     # Add description search
                 Q(session_id__icontains=current_search) |
-                Q(assign_team__icontains=current_search)
+                Q(assign_team__icontains=current_search) |
+                Q(issue_type__icontains=current_search)        # Add issue_type search
             )
         
         # Order tickets by creation date (newest first)
@@ -550,12 +709,9 @@ def ticket_list(request):
             'resolved_tickets': 0,
             'closed_tickets': 0,
         })
-    
-# ENHANCED TICKET_DETAIL FUNCTION (OPTIONAL IMPROVEMENTS)
-# Current function works fine, but this version adds better error handling and optimization
 
 def ticket_detail(request, ticket_id):
-    """Enhanced ticket detail with improved error handling and optimization"""
+    """FIXED ticket detail with proper field extraction"""
     try:
         # Get ticket with error handling
         ticket = get_object_or_404(Ticket, ticket_id=ticket_id)
@@ -579,22 +735,14 @@ def ticket_detail(request, ticket_id):
                 logger.debug(f"No metadata found for session {ticket.session_id}")
             except Exception as e:
                 logger.error(f"Error fetching metadata for session {ticket.session_id}: {e}")
-        
-        # Extract and validate failure details with better error handling
-        failure_details = {}
-        if ticket.failure_details:
-            try:
-                if isinstance(ticket.failure_details, dict):
-                    failure_details = ticket.failure_details
-                elif isinstance(ticket.failure_details, str):
-                    import json
-                    failure_details = json.loads(ticket.failure_details)
-            except (json.JSONDecodeError, TypeError) as e:
-                logger.warning(f"Invalid failure_details format for ticket {ticket_id}: {e}")
-                failure_details = {}
-        
-        # Extract and validate context data
-        context_data = {}
+        # FIXED: Extract channel name and other data from context_data or failure_details
+        channel_name = None
+        root_cause = None
+
+        # Try multiple sources for channel name
+        channel_sources = []
+
+        # 1. Try context_data first
         if ticket.context_data:
             try:
                 if isinstance(ticket.context_data, dict):
@@ -602,9 +750,82 @@ def ticket_detail(request, ticket_id):
                 elif isinstance(ticket.context_data, str):
                     import json
                     context_data = json.loads(ticket.context_data)
+                else:
+                    context_data = {}
+
+                # Extract channel name from various possible fields
+                channel_name = (
+                    context_data.get('asset_name') or 
+                    context_data.get('channel') or 
+                    context_data.get('channel_name') or
+                    context_data.get('Asset Name') or  # Case variations
+                    context_data.get('Channel') or
+                    context_data.get('Channel Name')
+                )
+                if channel_name:
+                    channel_sources.append(f"context_data: {channel_name}")
+
             except (json.JSONDecodeError, TypeError) as e:
                 logger.warning(f"Invalid context_data format for ticket {ticket_id}: {e}")
                 context_data = {}
+        else:
+            context_data = {}
+
+        # 2. Try failure_details if no channel from context_data
+        if not channel_name and ticket.failure_details:
+            try:
+                if isinstance(ticket.failure_details, dict):
+                    failure_details = ticket.failure_details
+                elif isinstance(ticket.failure_details, str):
+                    import json
+                    failure_details = json.loads(ticket.failure_details)
+                else:
+                    failure_details = {}
+
+                channel_name = (
+                    failure_details.get('asset_name') or 
+                    failure_details.get('channel') or 
+                    failure_details.get('channel_name') or
+                    failure_details.get('Asset Name') or
+                    failure_details.get('Channel') or
+                    failure_details.get('Channel Name')
+                )
+                if channel_name:
+                    channel_sources.append(f"failure_details: {channel_name}")
+
+                # Extract root cause from failure details
+                root_cause = failure_details.get('root_cause') or failure_details.get('issue') or failure_details.get('error')
+
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Invalid failure_details format for ticket {ticket_id}: {e}")
+                failure_details = {}
+        else:
+            # Initialize failure_details if we didn't process it above
+            if ticket.failure_details:
+                try:
+                    if isinstance(ticket.failure_details, dict):
+                        failure_details = ticket.failure_details
+                    elif isinstance(ticket.failure_details, str):
+                        import json
+                        failure_details = json.loads(ticket.failure_details)
+                    else:
+                        failure_details = {}
+                    root_cause = failure_details.get('root_cause') or failure_details.get('issue') or failure_details.get('error')
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Invalid failure_details format for ticket {ticket_id}: {e}")
+                    failure_details = {}
+            else:
+                failure_details = {}
+
+        # 3. Try related session if still no channel
+        if not channel_name and related_session and hasattr(related_session, 'asset_name'):
+            channel_name = related_session.asset_name
+            if channel_name:
+                channel_sources.append(f"related_session: {channel_name}")
+        
+        # Fallback: Use ticket title/description as root cause if not found in failure_details
+        if not root_cause:
+            root_cause = ticket.title or ticket.description
         
         # Extract and validate suggested actions
         suggested_actions = []
@@ -624,8 +845,10 @@ def ticket_detail(request, ticket_id):
         
         # Enhanced diagnosis check
         mvp_diagnosis = bool(
-            failure_details.get('root_cause') or 
-            (failure_details and any(failure_details.values()))
+            root_cause or 
+            failure_details or
+            ticket.title or 
+            ticket.description
         )
         
         # Enhanced context with additional useful data
@@ -634,6 +857,11 @@ def ticket_detail(request, ticket_id):
             'ticket': ticket,
             'related_session': related_session,
             'related_metadata': related_metadata,
+            
+            # FIXED: Extracted data for template display
+            'root_cause': root_cause,
+            'channel_name': channel_name,
+            'confidence_score': ticket.confidence_score,
             
             # Processed data
             'failure_details': failure_details,
@@ -660,8 +888,7 @@ def ticket_detail(request, ticket_id):
         logger.error(f"Ticket detail error for {ticket_id}: {e}", exc_info=True)
         messages.error(request, f"Error loading ticket {ticket_id}: {str(e)}")
         return redirect("tg:ticket_list")
-
-
+    
 # Replace update_ticket_status function (around lines 454-504) with this:
 
 @csrf_exempt
@@ -814,6 +1041,7 @@ def update_ticket_status(request, ticket_id):
         "success": False, 
         "error": "Invalid request method. Use GET to view or POST to update."
     })
+
 @csrf_exempt
 def update_ticket_status(request, ticket_id):
     """Complete enhanced ticket update - status, priority, team assignment"""
