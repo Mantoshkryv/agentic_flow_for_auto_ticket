@@ -70,6 +70,16 @@
             <div class="card-header">
                 <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Ticket Information</h5>
             </div>
+            <div class="card-body bg-light border-bottom">
+              <small class="text-muted">
+                    <strong>Debug Info:</strong> 
+                    channel_name: "{{ channel_name|default:'None' }}" | 
+                    confidence_score: "{{ confidence_score|default:'None' }}" | 
+                    ticket.confidence_score: "{{ ticket.confidence_score|default:'None' }}" |
+                    context_data keys: {{ context_data.keys|join:', ' }}
+                </small>
+            </div>
+
             <div class="card-body">
                 <div class="row mb-3">
                     <div class="col-md-6">
@@ -89,8 +99,8 @@
                 <div class="row mb-3">
                     <div class="col-md-6">
                         <h6 class="text-muted">Channel</h6>
-                        {% if ticket.channel %}
-                            <p><span class="badge bg-secondary">{{ ticket.channel }}</span></p>
+                        {% if channel_name %}
+                            <p><span class="badge bg-secondary">{{ channel_name }}</span></p>
                         {% else %}
                             <p class="text-muted fst-italic">Not specified</p>
                         {% endif %}
@@ -143,12 +153,17 @@
                 <h5 class="mb-0"><i class="bi bi-search me-2"></i>Root Cause Analysis</h5>
             </div>
             <div class="card-body">
-                {% if ticket.root_cause %}
+    
+                {% if root_cause %}
                     <div class="alert alert-warning d-flex align-items-start" role="alert">
                         <i class="bi bi-exclamation-triangle me-3" style="font-size: 1.5rem;"></i>
                         <div>
                             <h6 class="alert-heading">Identified Issue</h6>
-                            <p class="mb-0">{{ ticket.root_cause }}</p>
+                            <p class="mb-0">{{ root_cause }}</p>
+                            {% if evidence %}
+                                <hr class="my-2">
+                                <small class="text-muted"><strong>Evidence:</strong> {{ evidence }}</small>
+                            {% endif %}
                         </div>
                     </div>
                 {% else %}
@@ -158,9 +173,8 @@
                         <p class="text-muted mb-0">Analysis may be in progress or requires manual investigation.</p>
                     </div>
                 {% endif %}
-
                 <!-- TECHNICAL DETAILS -->
-                {% if failure_details %}
+                {% if ticket.failure_details %}
                 <div class="mt-3">
                     <h6 class="text-muted">Technical Details</h6>
                     <div class="accordion" id="technicalAccordion">
@@ -168,13 +182,13 @@
                             <h2 class="accordion-header">
                                 <button class="accordion-button collapsed" type="button" 
                                         data-bs-toggle="collapse" data-bs-target="#technicalDetails">
-                                    <i class="bi bi-gear me-2"></i>View Technical Information
+                                    <i class="bi bi-gear me-2"></i>View Additional Technical Information
                                 </button>
                             </h2>
                             <div id="technicalDetails" class="accordion-collapse collapse" 
                                  data-bs-parent="#technicalAccordion">
                                 <div class="accordion-body">
-                                    {% for key, value in failure_details.items %}
+                                    {% for key, value in ticket.failure_details.items %}
                                         <div class="mb-2">
                                             <strong class="text-primary">{{ key|title|cut:'_' }}:</strong>
                                             <div class="ms-3 text-muted">{{ value }}</div>
@@ -190,24 +204,23 @@
         </div>
 
         <!-- SUGGESTED ACTIONS CARD -->
-        {% if suggested_actions %}
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-lightbulb text-warning me-2"></i>Recommended Actions</h5>
-            </div>
-            <div class="card-body">
-                <div class="list-group list-group-flush">
-                    {% for action in suggested_actions %}
-                        <div class="list-group-item d-flex align-items-start">
-                            <span class="badge bg-primary me-3">{{ forloop.counter }}</span>
-                            <div>{{ action }}</div>
-                        </div>
-                    {% endfor %}
+        {% if ticket.suggested_actions %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-lightbulb text-warning me-2"></i>Recommended Actions</h5>
+                </div>
+                <div class="card-body">
+                    <div class="list-group list-group-flush">
+                        {% for action in ticket.suggested_actions %}
+                            <div class="list-group-item d-flex align-items-start">
+                                <span class="badge bg-primary me-3">{{ forloop.counter }}</span>
+                                <div>{{ action }}</div>
+                            </div>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
-        </div>
         {% endif %}
-
         <!-- RESOLUTION NOTES -->
         {% if ticket.resolution_notes %}
         <div class="card mb-4">
