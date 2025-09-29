@@ -637,33 +637,14 @@ class FlexibleUnifiedDataProcessor:
                     logger.info(f"✅ Processed {datatype}: {len(df_mapped)} records")
                 else:
                     processed_data[datatype] = df
-
-            # Step 3: Extract session IDs
-            #session_ids = self._extract_session_ids(processed_data)
-            
-            # CHANGE TO:
+                    
             session_ids = self._extract_session_ids(processed_data)
             
+            logger.info(f"📋 Extracted {len(session_ids)} unique session IDs")
             # HANDLE EMPTY RESULT GRACEFULLY
             if not session_ids:
                 logger.warning("No session IDs extracted - database appears to be empty")
-                
-                # Generate sample tickets for demonstration if no real data
-                sample_tickets = self._generate_sample_tickets_for_empty_database()
-                
-                return {
-                    'success': True,
-                    'processing_type': 'mongodb_empty_database',
-                    'session_ids_processed': 0,
-                    'tickets_generated': sample_tickets,
-                    'target_channels': target_channels or [],
-                    'data_counts': {k: len(v) for k, v in processed_data.items()},
-                    'warnings': ['Database appears to be empty - generated sample tickets'],
-                    'database_status': 'empty'
-                }
-            
-            logger.info(f"📋 Extracted {len(session_ids)} unique session IDs")
-
+        
             # Step 4: Generate tickets
             tickets_generated = self._generate_session_tickets_flexible(processed_data, target_channels)
 
