@@ -70,15 +70,6 @@
             <div class="card-header">
                 <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Ticket Information</h5>
             </div>
-            <div class="card-body bg-light border-bottom">
-              <small class="text-muted">
-                    <strong>Debug Info:</strong> 
-                    channel_name: "{{ channel_name|default:'None' }}" | 
-                    confidence_score: "{{ confidence_score|default:'None' }}" | 
-                    ticket.confidence_score: "{{ ticket.confidence_score|default:'None' }}" |
-                    context_data keys: {{ context_data.keys|join:', ' }}
-                </small>
-            </div>
 
             <div class="card-body">
                 <div class="row mb-3">
@@ -147,6 +138,46 @@
             </div>
         </div>
 
+        <!-- DESCRIPTION CARD - PROPER PLACEMENT -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-file-text me-2"></i>Description</h5>
+            </div>
+            <div class="card-body">
+                {% if ticket.description %}
+                    <div class="description-content" style="line-height: 1.8; font-size: 1.05rem;">
+                        {{ ticket.description|linebreaks }}
+                    </div>
+                    
+                    <!-- Show title as summary if different from description -->
+                    {% if ticket.title and ticket.title != ticket.description %}
+                        <div class="mt-3 pt-3 border-top">
+                            <h6 class="text-muted mb-2">Issue Summary</h6>
+                            <p class="mb-0 fw-semibold">{{ ticket.title }}</p>
+                        </div>
+                    {% endif %}
+                    
+                    <!-- Show issue type if meaningful -->
+                    {% if ticket.issue_type %}
+                        <div class="mt-2">
+                            <small class="text-muted">
+                                <i class="bi bi-tag me-1"></i>
+                                <strong>Type:</strong> {{ ticket.issue_type|title|cut:"_" }}
+                            </small>
+                        </div>
+                    {% endif %}
+                {% else %}
+                    <div class="alert alert-info mb-0 d-flex align-items-center">
+                        <i class="bi bi-info-circle me-2 flex-shrink-0" style="font-size: 1.5rem;"></i>
+                        <div>
+                            <strong>No detailed description available.</strong>
+                            <br><small>Review the Root Cause Analysis and Technical Details sections below for diagnostic information.</small>
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
         <!-- ROOT CAUSE ANALYSIS CARD -->
         <div class="card mb-4">
             <div class="card-header">
@@ -173,6 +204,7 @@
                         <p class="text-muted mb-0">Analysis may be in progress or requires manual investigation.</p>
                     </div>
                 {% endif %}
+                
                 <!-- TECHNICAL DETAILS -->
                 {% if ticket.failure_details %}
                 <div class="mt-3">
@@ -221,6 +253,7 @@
                 </div>
             </div>
         {% endif %}
+        
         <!-- RESOLUTION NOTES -->
         {% if ticket.resolution_notes %}
         <div class="card mb-4">
@@ -228,7 +261,7 @@
                 <h5 class="mb-0"><i class="bi bi-check-circle me-2"></i>Resolution Notes</h5>
             </div>
             <div class="card-body">
-                <p class="mb-0">{{ ticket.resolution_notes }}</p>
+                <p class="mb-0">{{ ticket.resolution_notes|linebreaks }}</p>
             </div>
         </div>
         {% endif %}
