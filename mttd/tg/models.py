@@ -48,57 +48,57 @@ class KPI(BaseModel):
     
     # Playing time metrics - EXACT COLUMN NAMES
     playing_time_ended_mins = models.FloatField(
-        verbose_name="Playing Time (Ended) (mins)",
+        db_column="Playing Time (Ended) (mins)",
         null=True, blank=True
     )
     streaming_performance_index = models.FloatField(
-        verbose_name="Streaming Performance Index", 
+        db_column="Streaming Performance Index", 
         null=True, blank=True
     )
     
     # Video Start Failures - EXACT COLUMN NAMES FROM DATASET
     video_start_failures_technical = models.IntegerField(
-        verbose_name="Video Start Failures Technical",
+        db_column="Video Start Failures Technical",
         default=0, db_index=True
     )
     video_start_failures_business = models.IntegerField(
-        verbose_name="Video Start Failures Business",
+        db_column="Video Start Failures Business",
         default=0, db_index=True
     )
     exit_before_video_starts = models.IntegerField(
-        verbose_name="Exit Before Video Starts", 
+        db_column="Exit Before Video Starts", 
         default=0, db_index=True
     )
     
     # Video Playback Failures - EXACT COLUMN NAMES
     video_playback_failures_technical = models.IntegerField(
-        verbose_name="Video Playback Failures Technical",
+        db_column="Video Playback Failures Technical",
         default=0
     )
     video_playback_failures_business = models.IntegerField(
-        verbose_name="Video Playback Failures Business",
+        db_column="Video Playback Failures Business",
         default=0
     )
     
     # Quality metrics - EXACT COLUMN NAMES FROM DATASET
     video_start_time_sec = models.FloatField(
-        verbose_name="Video Start Time(sec)",
+        db_column="Video Start Time(sec)",
         null=True, blank=True
     )
     rebuffering_ratio_pct = models.FloatField(
-        verbose_name="Rebuffering Ratio(%)",
-        null=True, blank=True  
+        db_column="Rebuffering Ratio(%)",
+        null=True, blank=True
     )
     connection_induced_rebuffering_ratio_pct = models.FloatField(
-        verbose_name="Connection Induced Rebuffering Ratio(%)",
+        db_column="Connection Induced Rebuffering Ratio(%)",
         null=True, blank=True
     )
     video_restart_time_sec = models.FloatField(
-        verbose_name="Video Restart Time(sec)",
+        db_column="Video Restart Time(sec)",
         null=True, blank=True
     )
     avg_peak_bitrate_mbps = models.FloatField(
-        verbose_name="Avg. Peak Bitrate(Mbps)",
+        db_column="Avg. Peak Bitrate(Mbps)",
         null=True, blank=True
     )
     
@@ -129,97 +129,97 @@ class Session(BaseModel):
     
     # Primary identifiers - EXACT NAMES FROM DATASET
     session_id = models.CharField(
-        verbose_name="Session ID",
+        db_column="Session ID",
         max_length=255, unique=False, db_index=False
     )
     viewer_id = models.CharField(
-        verbose_name="Viewer ID",
+        db_column="Viewer ID",
         max_length=255, null=True, blank=True, db_index=True
     )
     
     # Time fields - EXACT COLUMN NAMES FROM DATASET  
-    session_start_time = models.DateTimeField(
-        verbose_name="Session Start Time",
-        null=True, blank=True, db_index=True
+    session_start_time = models.CharField(
+        db_column="Session Start Time",
+        max_length=255, null=True, blank=True, db_index=True
     )
-    session_end_time = models.DateTimeField(
-        verbose_name="Session End Time", 
-        null=True, blank=True
+    session_end_time = models.CharField(
+        db_column="Session End Time",
+        max_length=255, null=True, blank=True, db_index=True
     )
     
     # Content information - EXACT COLUMN NAMES
     asset_name = models.CharField(
-        verbose_name="Asset Name",
+        db_column="Asset Name",
         max_length=500, null=True, blank=True, db_index=True
     )
     
     # Status fields - EXACT COLUMN NAMES FROM DATASET
     status = models.CharField(
-        verbose_name="Status",
+        db_column="Status",
         max_length=50, null=True, blank=True, db_index=True
     )
     ended_status = models.CharField(
-        verbose_name="Ended Status",
+        db_column="Ended Status",
         max_length=50, null=True, blank=True, db_index=True
     )
     ended_session = models.BooleanField(
-        verbose_name="Ended Session", 
+        db_column="Ended Session",
         null=True, blank=True
     )
     impacted_session = models.BooleanField(
-        verbose_name="Impacted Session",
+        db_column="Impacted Session",
         null=True, blank=True
     )
     
     # Quality metrics - EXACT COLUMN NAMES FROM DATASET
     playing_time = models.FloatField(
-        verbose_name="Playing Time",
+        db_column="Playing Time",
         null=True, blank=True
     )
     video_start_time = models.FloatField(
-        verbose_name="Video Start Time", 
+        db_column="Video Start Time",
         null=True, blank=True
     )
     total_video_restart_time = models.FloatField(
-        verbose_name="Total Video Restart Time",
+        db_column="Total Video Restart Time",
         null=True, blank=True
     )
     rebuffering_ratio = models.FloatField(
-        verbose_name="Rebuffering Ratio",
+        db_column="Rebuffering Ratio",
         null=True, blank=True
     )
     connection_induced_rebuffering_ratio = models.FloatField(
-        verbose_name="Connection Induced Rebuffering Ratio",
+        db_column="Connection Induced Rebuffering Ratio",
         null=True, blank=True
     )
     avg_peak_bitrate = models.FloatField(
-        verbose_name="Avg. Peak Bitrate",
+        db_column="Avg. Peak Bitrate",
         null=True, blank=True
     )
     avg_average_bitrate = models.FloatField(
-        verbose_name="Avg. Average Bitrate",
+        db_column="Avg. Average Bitrate",
         null=True, blank=True
     )
     average_framerate = models.FloatField(
-        verbose_name="Average Framerate", 
+        db_column="Average Framerate",
         null=True, blank=True
     )
     starting_bitrate = models.FloatField(
-        verbose_name="Starting Bitrate",
+        db_column="Starting Bitrate",
         null=True, blank=True
     )
     bitrate_switches = models.IntegerField(
-        verbose_name="Bitrate Switches",
+        db_column="Bitrate Switches",
         null=True, blank=True
     )
     
     # Failure indicators - EXACT COLUMN NAMES FROM DATASET
     video_start_failure = models.BooleanField(
-        verbose_name="Video Start Failure",
+        db_column="Video Start Failure",
         null=True, blank=True, db_index=True
     )
     exit_before_video_starts = models.BooleanField(
-        verbose_name="Exit Before Video Starts",
+        db_column="Exit Before Video Starts",
         null=True, blank=True, db_index=True
     )
     
@@ -238,7 +238,7 @@ class Session(BaseModel):
             models.Index(fields=['exit_before_video_starts', 'status']),
             models.Index(fields=['ticket_generated', 'processing_batch']),
         ]
-        verbose_name = "Session"
+        verbose_name = "Sessions"
         verbose_name_plural = "Sessions"
 
     def __str__(self):
@@ -276,131 +276,131 @@ class Advancetags(BaseModel):
     
     # Primary identifier - EXACT NAME FROM DATASET
     session_id = models.CharField(
-        verbose_name="Session ID",
+        db_column="Session Id",
         max_length=255, db_index=True
     )
     
     # Content information - EXACT COLUMN NAMES  
     asset_name = models.CharField(
-        verbose_name="Asset Name",
+        db_column="Asset Name",
         max_length=500, null=True, blank=True
     )
     content_category = models.CharField(
-        verbose_name="Content Category",
+        db_column="Content Category",
         max_length=200, null=True, blank=True
     )
     
     # Browser information - EXACT COLUMN NAMES FROM DATASET
     browser_name = models.CharField(
-        verbose_name="Browser Name", 
+        db_column="Browser Name", 
         max_length=200, null=True, blank=True, db_index=True
     )
     browser_version = models.CharField(
-        verbose_name="Browser Version",
+        db_column="Browser Version",
         max_length=100, null=True, blank=True
     )
     
     # Device information - EXACT COLUMN NAMES FROM DATASET
     device_hardware_type = models.CharField(
-        verbose_name="Device Hardware Type",
+        db_column="Device Hardware Type",
         max_length=200, null=True, blank=True
     )
     device_manufacturer = models.CharField(
-        verbose_name="Device Manufacturer", 
+        db_column="Device Manufacturer", 
         max_length=200, null=True, blank=True
     )
     device_marketing_name = models.CharField(
-        verbose_name="Device Marketing Name",
+        db_column="Device Marketing Name",
         max_length=200, null=True, blank=True
     )
     device_model = models.CharField(
-        verbose_name="Device Model",
+        db_column="Device Model",
         max_length=200, null=True, blank=True
     )
     device_name = models.CharField(
-        verbose_name="Device Name",
+        db_column="Device Name",
         max_length=200, null=True, blank=True
     )
     device_operating_system = models.CharField(
-        verbose_name="Device Operating System",
+        db_column="Device Operating System",
         max_length=200, null=True, blank=True, db_index=True
     )
     device_operating_system_family = models.CharField(
-        verbose_name="Device Operating System Family",
+        db_column="Device Operating System Family",
         max_length=200, null=True, blank=True
     )
     device_operating_system_version = models.CharField(
-        verbose_name="Device Operating System Version",
+        db_column="Device Operating System Version",
         max_length=100, null=True, blank=True
     )
     
     # App and Player information - EXACT COLUMN NAMES
     app_name = models.CharField(
-        verbose_name="App Name",
+        db_column="App Name",
         max_length=200, null=True, blank=True
     )
     app_version = models.CharField(
-        verbose_name="App Version", 
+        db_column="App Version", 
         max_length=100, null=True, blank=True
     )
     player_framework_name = models.CharField(
-        verbose_name="Player Framework Name",
+        db_column="Player Framework Name",
         max_length=200, null=True, blank=True
     )
     player_framework_version = models.CharField(
-        verbose_name="Player Framework Version",
+        db_column="Player Framework Version",
         max_length=100, null=True, blank=True
     )
     
     # Network and CDN information - EXACT COLUMN NAMES
     cdn = models.CharField(
-        verbose_name="CDN", 
+        db_column="CDN", 
         max_length=100, null=True, blank=True, db_index=True
     )
     last_cdn = models.CharField(
-        verbose_name="Last CDN",
+        db_column="Last CDN",
         max_length=100, null=True, blank=True
     )
     
     # Geographic information - EXACT COLUMN NAMES FROM DATASET
     city = models.CharField(
-        verbose_name="City",
+        db_column="City",
         max_length=100, null=True, blank=True, db_index=True
     )
     state = models.CharField(
-        verbose_name="State",
+        db_column="State",
         max_length=100, null=True, blank=True
     )
     country = models.CharField(
-        verbose_name="Country",
+        db_column="Country",
         max_length=100, null=True, blank=True, db_index=True
     )
     address = models.TextField(
-        verbose_name="Address",
+        db_column="Address",
         null=True, blank=True
     )
     
     # Network details - EXACT COLUMN NAMES FROM DATASET
     ip = models.GenericIPAddressField(
-        verbose_name="IP",
+        db_column="IP",
         null=True, blank=True, protocol='both'
     )
     ipv6 = models.GenericIPAddressField(
-        verbose_name="IPv6", 
+        db_column="IPv6", 
         null=True, blank=True, protocol='IPv6'
     )
     asnname = models.CharField(
-        verbose_name="ASNName",
+        db_column="ASNName",
         max_length=200, null=True, blank=True
     )
     ispname = models.CharField(
-        verbose_name="ISPName",
+        db_column="ISPName",
         max_length=200, null=True, blank=True, db_index=True
     )
     
     # Stream information - EXACT COLUMN NAME
     streamurl = models.URLField(
-        verbose_name="StreamURL",
+        db_column="StreamURL",
         max_length=1000, null=True, blank=True
     )
     
