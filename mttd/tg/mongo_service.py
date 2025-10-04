@@ -88,42 +88,36 @@ class MongoDBService:
         except Exception as e:
             logger.error(f"❌ Raw query failed: {e}")
             return pd.DataFrame()
-        
     def fetch_sessions_data(self, target_channels: List[str] = None, limit: int = None) -> pd.DataFrame:
-        """Fetch sessions data using Django ORM - NO DOUBLE MAPPING"""
+        """Fetch sessions - NO COLUMN RENAMING"""
         try:
             query = Session.objects.all()
-    
+
             if target_channels:
                 query = query.filter(asset_name__in=target_channels)
-    
+
             if limit:
                 query = query[:limit]
-    
+
             data = list(query.values())
             if not data:
                 logger.warning("No sessions data found")
                 return pd.DataFrame()
-    
+
             df = pd.DataFrame(data)
-            
-            # DON'T RENAME COLUMNS - Keep Django field names as-is
-            # Remove Django auto fields if present
-            columns_to_remove = ['id', '_id', 'created_at', 'updated_at']
-            for col in columns_to_remove:
+
+            # Remove Django internal fields only
+            for col in ['id', '_id', 'created_at', 'updated_at']:
                 if col in df.columns:
                     df = df.drop(col, axis=1)
-    
-            logger.info(f"Fetched {len(df)} sessions using Django ORM")
-            logger.info(f"Available columns: {list(df.columns)}")
-    
-            self.stats["fetched_records"] += len(df)
-            return df
-    
-        except Exception as e:
-            logger.error(f"Error fetching sessions data: {e}")
-            return pd.DataFrame()
 
+            logger.info(f"Fetched {len(df)} sessions with columns: {list(df.columns)[:5]}")
+            return df
+
+        except Exception as e:
+            logger.error(f"Error fetching sessions: {e}", exc_info=True)
+            return pd.DataFrame()
+        
     def fetch_kpi_data(self, target_channels: List[str] = None, limit: int = None) -> pd.DataFrame:
         """Fetch KPI data via Django ORM"""
         try:
@@ -313,165 +307,101 @@ class MongoDBService:
         return len(errors) == 0, errors
     
     def bulk_create_tickets(self, tickets_data: List[Dict[str, Any]]) -> int:
-        """
-        Robust ticket creation with comprehensive error handling
-        Returns: Number of tickets successfully saved
-        """
+        """Save tickets - FIXED for MongoDB backend without ignore_conflicts"""
         if not tickets_data:
-            logger.warning("No tickets data to save")
+            logger.warning("No tickets to save")
             return 0
-    
-        logger.info(f"Starting ticket save process: {len(tickets_data)} tickets to process")
-    
+
+        logger.info(f"Saving {len(tickets_data)} tickets")
+
         try:
-            # Step 1: Prepare and validate ticket objects
+            # Step 1: Prepare ticket objects
             ticket_objects = []
-            validation_failures = []
-    
-            for i, ticket_data in enumerate(tickets_data):
+            skipped = []
+
+            for i, ticket in enumerate(tickets_data):
                 try:
-                    # Extract session_id with multiple fallbacks
-                    session_id = (
-                        ticket_data.get('session_id') or 
-                        ticket_data.get('Session ID') or
-                        ticket_data.get('Session Id')
-                    )
-                    
-                    # Strict validation
-                    if not session_id:
-                        validation_failures.append(f"Ticket {i}: No session_id found")
+                    session_id = str(ticket['session_id']).strip()
+
+                    if not session_id or len(session_id) < 3:
+                        skipped.append(f"Row {i}: session_id too short")
                         continue
                     
-                    session_id = str(session_id).strip()
-                    if not session_id or session_id.lower() in ['nan', 'none', 'null', '']:
-                        validation_failures.append(f"Ticket {i}: Invalid session_id '{session_id}'")
-                        continue
-                    
-                    # Generate ticket_id
-                    ticket_id = ticket_data.get('ticket_id')
-                    if not ticket_id:
-                        ticket_id = f"TKT_{session_id}"
-                    ticket_id = str(ticket_id).strip()
-                    
-                    # Extract and validate other fields
-                    title = ticket_data.get('title', '')
-                    if not title:
-                        asset_name = ticket_data.get('Asset Name', 
-                                      ticket_data.get('asset_name', 'Unknown Channel'))
-                        title = f"Video Issue - {asset_name}"
-                    
-                    description = ticket_data.get('description', '')
-                    if not description:
-                        description = f"Auto-generated ticket for session {session_id}"
-                    
-                    # Create ticket object with all required fields
                     ticket_obj = Ticket(
-                        ticket_id=ticket_id,
+                        ticket_id=ticket.get('ticket_id', f"TKT_{session_id}"),
                         session_id=session_id,
-                        title=title[:200],  # Truncate if needed
-                        description=description,
-                        priority=ticket_data.get('priority', 'medium'),
-                        status=ticket_data.get('status', 'new'),
-                        assign_team=ticket_data.get('assign_team', 'technical'),
-                        issue_type=ticket_data.get('issue_type', 'video_start_failure'),
-                        confidence_score=self._extract_confidence_score(ticket_data),
-                        failure_details=ticket_data.get('failure_details', {}),
-                        context_data=ticket_data.get('context_data', {}),
-                        suggested_actions=ticket_data.get('suggested_actions', []),
+                        title=ticket.get('title', 'Auto-generated')[:200],
+                        description=ticket.get('description', ''),
+                        priority=ticket.get('priority', 'medium'),
+                        status=ticket.get('status', 'new'),
+                        assign_team=ticket.get('assign_team', 'technical'),
+                        issue_type=ticket.get('issue_type', 'video_start_failure'),
+                        confidence_score=float(ticket.get('confidence_score', 0.6)),
+                        failure_details=ticket.get('failure_details', {}),
+                        context_data=ticket.get('context_data', {}),
+                        suggested_actions=ticket.get('suggested_actions', []),
                         data_source='auto'
                     )
-    
                     ticket_objects.append(ticket_obj)
-                    
+
+                except KeyError as e:
+                    skipped.append(f"Row {i}: Missing {e}")
                 except Exception as e:
-                    validation_failures.append(f"Ticket {i}: {type(e).__name__} - {str(e)}")
-                    continue
-                
-            # Log validation results
-            if validation_failures:
-                logger.warning(f"Validation failures: {len(validation_failures)}")
-                for failure in validation_failures[:5]:  # Show first 5
-                    logger.warning(f"  - {failure}")
-            
+                    skipped.append(f"Row {i}: {type(e).__name__}")
+
+            if skipped:
+                logger.warning(f"Skipped {len(skipped)} tickets: {skipped[:3]}")
+
             if not ticket_objects:
-                logger.error("No valid ticket objects after validation")
+                logger.error("No valid tickets to save")
                 return 0
-    
-            logger.info(f"Validated {len(ticket_objects)} tickets successfully")
-    
-            # Step 2: Check for duplicates
+
+            # Step 2: Check for existing tickets (manual duplicate handling)
             ticket_ids = [t.ticket_id for t in ticket_objects]
-            existing_tickets = Ticket.objects.filter(ticket_id__in=ticket_ids)
-            existing_ids = set(existing_tickets.values_list('ticket_id', flat=True))
-            
+            existing_ids = set(Ticket.objects.filter(
+                ticket_id__in=ticket_ids
+            ).values_list('ticket_id', flat=True))
+
             if existing_ids:
-                logger.info(f"Found {len(existing_ids)} existing tickets, will skip duplicates")
+                logger.info(f"Found {len(existing_ids)} existing tickets, filtering them out")
                 ticket_objects = [t for t in ticket_objects if t.ticket_id not in existing_ids]
-                
-                if not ticket_objects:
-                    logger.info("All tickets already exist in database")
-                    return len(existing_ids)
-    
-            logger.info(f"Ready to save {len(ticket_objects)} new tickets")
-    
-            # Step 3: Attempt bulk save with fallback strategies
-            
-            # Strategy 1: Standard bulk_create
-            try:
-                with transaction.atomic():
-                    created_tickets = Ticket.objects.bulk_create(
-                        ticket_objects,
-                        ignore_conflicts=True
-                    )
-                    
-                tickets_saved = len(created_tickets) if created_tickets else len(ticket_objects)
-                logger.info(f"SUCCESS: Bulk save completed - {tickets_saved} tickets saved")
-                self.stats["tickets_created"] = tickets_saved
-                return tickets_saved
-                
-            except Exception as bulk_error:
-                logger.error(f"Bulk save failed: {type(bulk_error).__name__}: {str(bulk_error)}")
-                
-                # Strategy 2: Try smaller batches
-                logger.info("Attempting batch save strategy...")
-                batch_size = 50
-                saved_count = 0
-                
-                for batch_start in range(0, len(ticket_objects), batch_size):
-                    batch = ticket_objects[batch_start:batch_start + batch_size]
-                    try:
-                        with transaction.atomic():
-                            created = Ticket.objects.bulk_create(batch, ignore_conflicts=True)
-                        batch_saved = len(created) if created else len(batch)
-                        saved_count += batch_saved
-                        logger.info(f"  Batch {batch_start//batch_size + 1}: Saved {batch_saved} tickets")
-                        
-                    except Exception as batch_error:
-                        logger.error(f"  Batch {batch_start//batch_size + 1} failed: {str(batch_error)}")
-                        
-                        # Strategy 3: Individual saves for failed batch
-                        logger.info(f"  Attempting individual saves for failed batch...")
-                        for ticket_obj in batch:
-                            try:
-                                ticket_obj.save()
-                                saved_count += 1
-                            except Exception as individual_error:
-                                logger.error(f"    Failed to save {ticket_obj.ticket_id}: {str(individual_error)}")
-                
-                if saved_count > 0:
-                    logger.info(f"PARTIAL SUCCESS: Saved {saved_count}/{len(ticket_objects)} tickets")
-                    self.stats["tickets_created"] = saved_count
-                    return saved_count
-                else:
-                    logger.error("FAILED: Could not save any tickets")
-                    return 0
-    
+
+            if not ticket_objects:
+                logger.info("All tickets already exist in database")
+                return len(existing_ids)
+
+            # Step 3: Bulk create WITHOUT ignore_conflicts
+            with transaction.atomic():
+                created = Ticket.objects.bulk_create(ticket_objects)
+
+            saved_count = len(created) if created else len(ticket_objects)
+            logger.info(f"Successfully saved {saved_count} new tickets")
+            self.stats["tickets_created"] = saved_count
+            return saved_count
+
         except Exception as e:
-            logger.error(f"CRITICAL ERROR in bulk_create_tickets: {type(e).__name__}: {str(e)}", 
-                        exc_info=True)
+            logger.error(f"Bulk save failed: {e}", exc_info=True)
+
+            # Fallback: Save one by one
+            logger.info("Attempting individual saves as fallback...")
+            saved_count = 0
+
+            for ticket_obj in ticket_objects:
+                try:
+                    # Check if exists
+                    if not Ticket.objects.filter(ticket_id=ticket_obj.ticket_id).exists():
+                        ticket_obj.save()
+                        saved_count += 1
+                except Exception as save_error:
+                    logger.error(f"Failed to save {ticket_obj.ticket_id}: {save_error}")
+
+            if saved_count > 0:
+                logger.info(f"Fallback saved {saved_count} tickets")
+                self.stats["tickets_created"] = saved_count
+                return saved_count
+
             return 0
-
-
+        
     def get_collection_stats(self) -> Dict[str, Any]:
         """Get detailed collection statistics"""
         try:
