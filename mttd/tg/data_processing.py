@@ -76,7 +76,7 @@ class FlexibleColumnMapper:
         # Session mappings
         self.session_mappings = {
             'session_id': {
-                'exact': ['session_id', 'Session ID', 'sessionid', 'SessionID'],
+                'exact': ['session_id', 'Session ID', 'Session_id', 'Session Id'],
                 'contains': ['session', 'session_id'],
                 'patterns': [r'session.*id', r'id.*session']
             },
@@ -637,14 +637,20 @@ class FlexibleUnifiedDataProcessor:
                     logger.info(f"✅ Processed {datatype}: {len(df_mapped)} records")
                 else:
                     processed_data[datatype] = df
-                    
+
+            # Step 3: Extract session IDs
+            #session_ids = self._extract_session_ids(processed_data)
+            
+            # CHANGE TO:
             session_ids = self._extract_session_ids(processed_data)
             
-            logger.info(f"📋 Extracted {len(session_ids)} unique session IDs")
             # HANDLE EMPTY RESULT GRACEFULLY
             if not session_ids:
                 logger.warning("No session IDs extracted - database appears to be empty")
-        
+                
+            
+            logger.info(f"📋 Extracted {len(session_ids)} unique session IDs")
+
             # Step 4: Generate tickets
             tickets_generated = self._generate_session_tickets_flexible(processed_data, target_channels)
 
@@ -781,103 +787,29 @@ class FlexibleUnifiedDataProcessor:
             return filtered_df
         
         return df
+        
     # Debug Session ID Values - Add this to your _extract_session_ids function
 
     def _extract_session_ids(self, data: Dict[str, pd.DataFrame]) -> List[str]:
-        """Extract unique session IDs from sessions data - WITH DEBUGGING"""
-        logger.info("=== Extracting Session IDs ===")
-
-        if 'sessions' not in data:
-            logger.warning("No 'sessions' key found in data")
+        """Extract session IDs - SIMPLIFIED"""
+        if 'sessions' not in data or data['sessions'].empty:
+            logger.warning("No sessions data")
             return []
 
         df = data['sessions']
-        if df.empty:
-            logger.warning("Sessions DataFrame is empty")
-            return []
 
-        logger.info(f"Processing sessions DataFrame: {len(df)} rows, {len(df.columns)} columns")
-        logger.info(f"Available columns: {list(df.columns)}")
-
-        session_id_columns = ['session_id', 'Session ID', 'sessionid', 'Session Id']
-
-        for col in session_id_columns:
+        for col in ['session_id', 'Session ID', 'sessionid', 'Session Id']:
             if col in df.columns:
-                logger.info(f"Found session ID column: '{col}'")
+                # Simple validation only
+                values = df[col].dropna().astype(str)
+                valid = [v.strip() for v in values 
+                        if v.strip() and v.strip().lower() != 'nan']
 
-                # DEBUG: Check raw values before any processing
-                raw_values = df[col].tolist()
-                logger.info(f"Raw values (first 10): {raw_values[:10]}")
-                logger.info(f"Total raw values: {len(raw_values)}")
-                logger.info(f"Non-null raw values: {df[col].notna().sum()}")
+                if valid:
+                    logger.info(f"Extracted {len(valid)} session IDs from '{col}'")
+                    return list(set(valid))
 
-                # Check data types
-                logger.info(f"Column dtype: {df[col].dtype}")
-                logger.info(f"Unique raw values: {df[col].nunique()}")
-
-                # Process values step by step
-                non_null_values = df[col].dropna()
-                logger.info(f"After dropna: {len(non_null_values)} values")
-                logger.info(f"Sample non-null values: {non_null_values.head(10).tolist()}")
-
-                string_values = non_null_values.astype(str)
-                logger.info(f"After astype(str): {len(string_values)} values")
-                logger.info(f"Sample string values: {string_values.head(10).tolist()}")
-
-                unique_values = string_values.unique().tolist()
-                logger.info(f"After unique(): {len(unique_values)} values")
-                logger.info(f"All unique values: {unique_values}")
-
-                # DEBUG: Test each validation step
-                step1_filtered = [sid for sid in unique_values if sid]
-                logger.info(f"After removing falsy values: {len(step1_filtered)} values")
-                logger.info(f"Step1 filtered: {step1_filtered}")
-
-                step2_filtered = [sid for sid in step1_filtered if str(sid).strip()]
-                logger.info(f"After removing empty strings: {len(step2_filtered)} values")
-                logger.info(f"Step2 filtered: {step2_filtered}")
-
-                excluded_values = ['nan', 'None', '', 'null', 'NULL']
-                step3_filtered = [sid for sid in step2_filtered if str(sid).strip() not in excluded_values]
-                logger.info(f"After removing excluded values {excluded_values}: {len(step3_filtered)} values")
-                logger.info(f"Step3 filtered (final): {step3_filtered}")
-
-                # DEBUG: Check what's being excluded
-                excluded = [sid for sid in step2_filtered if str(sid).strip() in excluded_values]
-                if excluded:
-                    logger.warning(f"These values were excluded: {excluded}")
-
-                # Check for other problematic values
-                weird_values = []
-                for val in unique_values:
-                    str_val = str(val).strip()
-                    if len(str_val) == 0:
-                        weird_values.append(f"Empty: '{val}'")
-                    elif str_val in excluded_values:
-                        weird_values.append(f"Excluded: '{val}'")
-                    elif len(str_val) < 3:
-                        weird_values.append(f"Too short: '{val}'")
-
-                if weird_values:
-                    logger.warning(f"Problematic values found: {weird_values[:10]}")
-
-                if step3_filtered:
-                    logger.info(f"SUCCESS: Extracted {len(step3_filtered)} valid session IDs")
-                    return step3_filtered
-                else:
-                    logger.error(f"FAILED: Column '{col}' exists but all values were filtered out")
-
-                    # Let's try a more lenient validation
-                    lenient_filtered = [
-                        sid for sid in unique_values 
-                        if sid and str(sid).strip() and str(sid).strip().lower() not in ['nan', 'none', 'null']
-                    ]
-
-                    if lenient_filtered:
-                        logger.info(f"LENIENT validation found {len(lenient_filtered)} values: {lenient_filtered}")
-                        return lenient_filtered
-
-        logger.error("No valid session IDs found in any column")
+        logger.error(f"No session ID column found. Columns: {list(df.columns)}")
         return []
 
     def _generate_session_tickets_flexible(self, session_data: Dict[str, pd.DataFrame], 
@@ -925,43 +857,48 @@ class FlexibleUnifiedDataProcessor:
             return 0
     
     def _prepare_tickets_for_save(self, tickets_data: List[Dict[str, Any]], 
-                             sessions_df: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Prepare tickets data with proper session_id extraction and validation"""
-        prepared_tickets = []
+                         sessions_df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """Prepare tickets - SIMPLIFIED"""
+        prepared = []
 
-        for ticket_info in tickets_data:
+        for ticket in tickets_data:
             try:
-                # Extract session ID using helper function
-                session_id = self._extract_session_id_for_ticket(ticket_info, sessions_df)
+                # DIRECT extraction - no complex fallbacks
+                session_id = ticket.get('session_id')
 
                 if not session_id:
-                    logger.warning("Skipping ticket - no valid session ID found")
+                    logger.warning(f"Ticket missing session_id: {ticket.get('ticket_id')}")
                     continue
                 
-                # Prepare ticket data with all required fields
-                prepared_ticket = {
-                    'session_id': session_id,
-                    'title': ticket_info.get('title', 'Auto-generated Ticket'),
-                    'description': ticket_info.get('description', ''),
-                    'priority': ticket_info.get('priority', 'medium'),
-                    'status': ticket_info.get('status', 'new'),
-                    'assign_team': ticket_info.get('assign_team', 'technical'),
-                    'issue_type': ticket_info.get('issue_type', 'video_start_failure'),
-                    'confidence_score': self._extract_confidence_score(ticket_info),
-                    'context_data': ticket_info.get('context_data', {}),
-                    'failure_details': ticket_info.get('failure_details', {}),
-                    'suggested_actions': ticket_info.get('suggested_actions', []),
-                    'data_source': 'auto'
-                }
+                session_id = str(session_id).strip()
 
-                prepared_tickets.append(prepared_ticket)
+                # Basic validation only
+                if not session_id or session_id.lower() in ['nan', 'none']:
+                    logger.warning(f"Invalid session_id: '{session_id}'")
+                    continue
+                
+                prepared.append({
+                    'session_id': session_id,
+                    'ticket_id': ticket.get('ticket_id', f"TKT_{session_id}"),
+                    'title': ticket.get('title', 'Auto-generated Ticket'),
+                    'description': ticket.get('description', ''),
+                    'priority': ticket.get('priority', 'medium'),
+                    'status': ticket.get('status', 'new'),
+                    'assign_team': ticket.get('assign_team', 'technical'),
+                    'issue_type': ticket.get('issue_type', 'video_start_failure'),
+                    'confidence_score': self._extract_confidence_score(ticket),
+                    'context_data': ticket.get('context_data', {}),
+                    'failure_details': ticket.get('failure_details', {}),
+                    'suggested_actions': ticket.get('suggested_actions', []),
+                    'data_source': 'auto'
+                })
 
             except Exception as e:
                 logger.error(f"Error preparing ticket: {e}")
                 continue
             
-        logger.info(f"Prepared {len(prepared_tickets)} valid tickets for saving")
-        return prepared_tickets
+        logger.info(f"Prepared {len(prepared)}/{len(tickets_data)} tickets")
+        return prepared
 
     def _extract_session_id_for_ticket(self, ticket_info: Dict[str, Any],
                                       sessions_df: pd.DataFrame) -> Optional[str]:
