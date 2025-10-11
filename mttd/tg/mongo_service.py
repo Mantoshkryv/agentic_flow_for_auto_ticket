@@ -59,37 +59,9 @@ class MongoDBService:
                 "collections": {}
             }
         
+
     def fetch_sessions_data(self, target_channels: List[str] = None, limit: int = None) -> pd.DataFrame:
-        """Fetch using Django raw() method"""
-        try:
-            # Use Django raw query
-            raw_query = "SELECT * FROM tg_session"
-            sessions = Session.objects.raw(raw_query)
-
-            # Convert to list of dicts with actual field names
-            data = []
-            for session in sessions:
-                session_dict = {}
-                for field in session._meta.fields:
-                    # Get the actual database column name
-                    db_column = getattr(field, 'db_column', field.name)
-                    value = getattr(session, field.name, None)
-                    session_dict[db_column or field.name] = value
-                data.append(session_dict)
-
-            if not data:
-                return pd.DataFrame()
-
-            df = pd.DataFrame(data)
-            logger.info(f"✅ Fetched {len(df)} sessions via raw query")
-
-            return df
-
-        except Exception as e:
-            logger.error(f"❌ Raw query failed: {e}")
-            return pd.DataFrame()
-    def fetch_sessions_data(self, target_channels: List[str] = None, limit: int = None) -> pd.DataFrame:
-        """Fetch sessions - NO COLUMN RENAMING"""
+        """CRITICAL: Fetch sessions with VERIFIED column names"""
         try:
             query = Session.objects.all()
 
@@ -101,21 +73,49 @@ class MongoDBService:
 
             data = list(query.values())
             if not data:
-                logger.warning("No sessions data found")
+                logger.warning("❌ No sessions data found in MongoDB")
                 return pd.DataFrame()
 
             df = pd.DataFrame(data)
+
+            # ✅ CRITICAL CHECK: Verify viewer_id column exists
+            logger.info("=" * 70)
+            logger.info("📊 MONGODB DATA VERIFICATION")
+            logger.info("=" * 70)
+            logger.info(f"Total records fetched: {len(df)}")
+            logger.info(f"Column names from MongoDB: {list(df.columns)}")
+
+            # Check critical columns
+            has_viewer_id = 'viewer_id' in df.columns
+            has_session_id = 'session_id' in df.columns
+
+            logger.info(f"✅ Has viewer_id: {has_viewer_id}")
+            logger.info(f"✅ Has session_id: {has_session_id}")
+
+            if has_viewer_id:
+                unique_viewers = df['viewer_id'].nunique()
+                logger.info(f"📈 Unique viewers: {unique_viewers}")
+                logger.info(f"📋 Sample viewer_ids: {df['viewer_id'].dropna().unique()[:5].tolist()}")
+            else:
+                logger.error("❌ CRITICAL: viewer_id column NOT FOUND in MongoDB data!")
+                logger.error(f"Available columns: {list(df.columns)}")
+
+            if has_session_id:
+                unique_sessions = df['session_id'].nunique()
+                logger.info(f"📈 Unique sessions: {unique_sessions}")
+                logger.info(f"📋 Sample session_ids: {df['session_id'].dropna().unique()[:5].tolist()}")
+
+            logger.info("=" * 70)
 
             # Remove Django internal fields only
             for col in ['id', '_id', 'created_at', 'updated_at']:
                 if col in df.columns:
                     df = df.drop(col, axis=1)
 
-            logger.info(f"Fetched {len(df)} sessions with columns: {list(df.columns)[:5]}")
             return df
 
         except Exception as e:
-            logger.error(f"Error fetching sessions: {e}", exc_info=True)
+            logger.error(f"❌ Error fetching sessions: {e}", exc_info=True)
             return pd.DataFrame()
         
     def fetch_kpi_data(self, target_channels: List[str] = None, limit: int = None) -> pd.DataFrame:
@@ -281,7 +281,51 @@ class MongoDBService:
                     pass
                 
         # Default confidence score
-        return 0.6
+        return 0.5
+    
+    def _extract_severity_score(self, ticket_data: Dict[str, Any]) -> int:
+        """
+        Extract severity_score from ticket data with robust fallback logic
+
+        Priority:
+        1. Root level 'severity_score'
+        2. failure_details['severity_score']
+        3. Calculate from priority string
+        4. Default to 5
+        """
+
+        # Try root level
+        if 'severity_score' in ticket_data:
+            try:
+                score = int(ticket_data['severity_score'])
+                if 0 <= score <= 10:
+                    return score
+            except (ValueError, TypeError):
+                pass
+            
+        # Try nested in failure_details
+        failure_details = ticket_data.get('failure_details', {})
+        if isinstance(failure_details, dict) and 'severity_score' in failure_details:
+            try:
+                score = int(failure_details['severity_score'])
+                if 0 <= score <= 10:
+                    return score
+            except (ValueError, TypeError):
+                pass
+            
+        # Try deriving from priority string
+        priority = ticket_data.get('priority', 'medium').lower()
+        priority_to_severity = {
+            'critical': 9,
+            'high': 7,
+            'medium': 5,
+            'low': 3
+        }
+        if priority in priority_to_severity:
+            return priority_to_severity[priority]
+
+        # Default severity
+        return 5
     
     def validate_ticket_data(self, ticket_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
         """Validate ticket data before saving"""
@@ -336,7 +380,8 @@ class MongoDBService:
                         status=ticket.get('status', 'new'),
                         assign_team=ticket.get('assign_team', 'technical'),
                         issue_type=ticket.get('issue_type', 'video_start_failure'),
-                        confidence_score=float(ticket.get('confidence_score', 0.6)),
+                        confidence_score=float(ticket.get('confidence_score', 0.5)),
+                        severity_score=int(ticket.get('severity_score', 5)),
                         failure_details=ticket.get('failure_details', {}),
                         context_data=ticket.get('context_data', {}),
                         suggested_actions=ticket.get('suggested_actions', []),
