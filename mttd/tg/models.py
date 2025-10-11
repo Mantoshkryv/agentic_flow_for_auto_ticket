@@ -12,12 +12,17 @@ Key Features:
 - Comprehensive indexing for performance
 """
 
-from django.db import models
+from typing import Any
+from django.db import models, transaction
+from django.db.models import Q
 from django.utils import timezone
 import uuid
 from django_mongodb_backend.fields import ObjectIdField
 from django.utils.translation import gettext_lazy as _
-from django.db import transaction
+import logging
+from typing import Dict, List, Any
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # BASE MODEL WITH COMMON FUNCTIONALITY
@@ -128,15 +133,16 @@ class Session(BaseModel):
     """Session data collection - EXACT column names from dataset maintained"""
     
     # Primary identifiers - EXACT NAMES FROM DATASET
+    viewer_id = models.CharField(
+        db_column="Viewer ID",
+        max_length=255, null=False, blank=True, db_index=True
+    )
+    
     session_id = models.CharField(
         db_column="Session ID",
         max_length=255, unique=False, db_index=False
     )
-    viewer_id = models.CharField(
-        db_column="Viewer ID",
-        max_length=255, null=True, blank=True, db_index=True
-    )
-    
+
     # Time fields - EXACT COLUMN NAMES FROM DATASET  
     session_start_time = models.CharField(
         db_column="Session Start Time",
@@ -275,8 +281,13 @@ class Advancetags(BaseModel):
     """Advanced metadata collection - EXACT column names from dataset"""
     
     # Primary identifier - EXACT NAME FROM DATASET
+    viewer_id = models.CharField(
+        db_column="Viewer ID",
+        max_length=255, null=False, blank=True, db_index=True
+    )
+    
     session_id = models.CharField(
-        db_column="Session Id",
+        db_column="Session ID",
         max_length=255, db_index=True
     )
     
@@ -429,12 +440,12 @@ class Advancetags(BaseModel):
 class Ticket(BaseModel):
     """Enhanced ticket model - SESSION-ONLY tickets with variable channel support"""
     
-    STATUS_CHOICES = [
+    CURRENT_STATUS = [
         ('new', _('New')),
-        ('in_progress', _('In Progress')),
+        ('in_progress', _('In_Progress')),
         ('resolved', _('Resolved')),
         ('closed', _('Closed')),
-        ('on_hold', _('On Hold')),
+        ('on_hold', _('On_Hold')),
     ]
     
     PRIORITY_CHOICES = [
@@ -459,14 +470,18 @@ class Ticket(BaseModel):
     
     # Ticket details
     title = models.CharField(max_length=500, null=True, blank=True)
-    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium', db_index=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='new', db_index=True)
-    assign_team = models.CharField(max_length=50, choices=TEAM_CHOICES, default='technical', db_index=True)
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, db_index=True)
+    status = models.CharField(max_length=20, choices=CURRENT_STATUS, db_index=True)
+    assign_team = models.CharField(max_length=50, choices=TEAM_CHOICES, db_index=True)
     
     # Issue information
     issue_type = models.CharField(max_length=100, null=True, blank=True, db_index=True)
     description = models.TextField(null=True, blank=True)
     resolution_notes = models.TextField(null=True, blank=True)
+    
+    # ENHANCED: Multi-layer diagnostic fields
+    confidence_score = models.FloatField(null=True, blank=True, db_index=True)  # 0.0-1.0
+    severity_score = models.IntegerField(db_index=True)  # 0-10 scale
     
     # Enhanced data fields for MVP ticket engine
     failure_details = models.JSONField(default=dict, null=True, blank=True)
@@ -476,8 +491,7 @@ class Ticket(BaseModel):
     # Unified pipeline tracking
     data_source = models.CharField(max_length=50, default='auto', db_index=True)
     processing_batch = models.CharField(max_length=100, null=True, blank=True, db_index=True)
-    confidence_score = models.FloatField(null=True, blank=True)
-    
+
     # Timestamps
     resolved_at = models.DateTimeField(null=True, blank=True)
 
@@ -490,6 +504,9 @@ class Ticket(BaseModel):
             models.Index(fields=['processing_batch', 'data_source']),
             models.Index(fields=['created_at', 'status']),
             models.Index(fields=['issue_type', 'confidence_score']),
+            models.Index(fields=['severity_score', 'status']),
+            models.Index(fields=['confidence_score', 'severity_score']),
+            models.Index(fields=['severity_score', 'created_at']),
         ]
         verbose_name = "Ticket"
         verbose_name_plural = "Tickets"
@@ -497,7 +514,19 @@ class Ticket(BaseModel):
     def save(self, *args, **kwargs):
         """Enhanced save with auto-generation of ticket_id"""
         if not self.ticket_id:
-            self.ticket_id = f"TKT_{self.session_id}"
+            self.ticket_id = f"TKT_{self.viewer_id}_{self.session_id}"
+
+        # ENHANCED: Validate severity_score range (0-10)
+        if self.severity_score is not None:
+            self.severity_score = max(0, min(10, int(self.severity_score)))
+        
+        # ENHANCED: Validate confidence_score range (0.0-1.0)
+        if self.confidence_score is not None:
+            self.confidence_score = max(0.0, min(1.0, float(self.confidence_score)))
+        
+        # ENHANCED: Ensure failure_details is a valid dict
+        if not isinstance(self.failure_details, dict):
+            self.failure_details = {}
             
         # Set resolved_at when status changes to resolved
         if self.status == 'resolved' and not self.resolved_at:
@@ -508,8 +537,252 @@ class Ticket(BaseModel):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Ticket-{self.ticket_id}-{self.status}-{self.priority}"
+        return f"Ticket-{self.ticket_id}-{self.status}-{self.severity_label}"
+    
+    @property
+    def severity_label(self) -> str:
+        """Get human-readable severity label from score"""
+        if self.severity_score >= 8:
+            return 'CRITICAL'
+        elif self.severity_score >= 6:
+            return 'HIGH'
+        elif self.severity_score >= 4:
+            return 'MEDIUM'
+        else:
+            return 'LOW'
+    
+    @property
+    def confidence_percentage(self) -> int:
+        """Get confidence as percentage"""
+        if self.confidence_score is not None:
+            return int(self.confidence_score * 100)
+        return 0
+    
+    @property
+    def root_cause(self) -> str:
+        """Extract root cause from failure_details"""
+        if isinstance(self.failure_details, dict):
+            return self.failure_details.get('root_cause', 'Unknown')
+        return 'Unknown'
+    
+    @property
+    def user_behavior_pattern(self) -> str:
+        """Extract user behavior pattern from failure_details"""
+        if isinstance(self.failure_details, dict):
+            user_behavior = self.failure_details.get('user_behavior', {})
+            if isinstance(user_behavior, dict):
+                return user_behavior.get('pattern', 'unknown')
+        return 'unknown'
+    
+    @property
+    def user_value_tier(self) -> str:
+        """Extract user value tier from failure_details"""
+        if isinstance(self.failure_details, dict):
+            user_behavior = self.failure_details.get('user_behavior', {})
+            if isinstance(user_behavior, dict):
+                return user_behavior.get('user_value_tier', 'unknown')
+        return 'unknown'
+    
+    @property
+    def is_deteriorating_user(self) -> bool:
+        """Check if ticket represents deteriorating user experience"""
+        return self.user_behavior_pattern == 'deteriorating_experience'
+    
+    @property
+    def is_reliable_user_affected(self) -> bool:
+        """Check if reliable user was affected"""
+        return self.user_behavior_pattern == 'reliable_user_hit_issue'
+    
+    @property
+    def is_premium_user(self) -> bool:
+        """Check if premium user was affected"""
+        return self.user_value_tier == 'premium'
+    
+    @property
+    def temporal_trend(self) -> str:
+        """Get temporal trend from failure_details"""
+        if isinstance(self.failure_details, dict):
+            temporal = self.failure_details.get('temporal_analysis', {})
+            if isinstance(temporal, dict):
+                return temporal.get('trend', 'unknown')
+        return 'unknown'
+    
+    @property
+    def temporal_pattern(self) -> str:
+        """Get temporal pattern from failure_details"""
+        if isinstance(self.failure_details, dict):
+            temporal = self.failure_details.get('temporal_analysis', {})
+            if isinstance(temporal, dict):
+                return temporal.get('pattern', 'unknown')
+        return 'unknown'
+    
+    @property
+    def has_geographic_correlation(self) -> bool:
+        """Check if ticket has geographic correlation data"""
+        if isinstance(self.failure_details, dict):
+            geo_analysis = self.failure_details.get('geographic_analysis', {})
+            if isinstance(geo_analysis, dict):
+                return geo_analysis.get('is_widespread', False)
+        return False
+    
+    @property
+    def concurrent_failures_count(self) -> int:
+        """Get count of concurrent failures from geographic analysis"""
+        if isinstance(self.failure_details, dict):
+            geo_analysis = self.failure_details.get('geographic_analysis', {})
+            if isinstance(geo_analysis, dict):
+                return geo_analysis.get('concurrent_count', 0)
+        return 0
+    
+    @property
+    def affected_location(self) -> str:
+        """Get affected location from geographic analysis"""
+        if isinstance(self.failure_details, dict):
+            geo_analysis = self.failure_details.get('geographic_analysis', {})
+            if isinstance(geo_analysis, dict):
+                city = geo_analysis.get('affected_city', '')
+                isp = geo_analysis.get('affected_isp', '')
+                if city and isp:
+                    return f"{city} ({isp})"
+                return city or isp or 'Unknown'
+        return 'Unknown'
 
+    # ========================================================================
+    # ENHANCED ANALYSIS METHODS
+    # ========================================================================
+    
+    def get_diagnostic_summary(self) -> dict:
+        """Get comprehensive diagnostic summary"""
+        return {
+            'ticket_id': self.ticket_id,
+            'session_id': self.session_id,
+            'root_cause': self.root_cause,
+            'confidence': self.confidence_score,
+            'confidence_percentage': self.confidence_percentage,
+            'severity_score': self.severity_score,
+            'severity_label': self.severity_label,
+            'user_pattern': self.user_behavior_pattern,
+            'user_value_tier': self.user_value_tier,
+            'temporal_trend': self.temporal_trend,
+            'temporal_pattern': self.temporal_pattern,
+            'geographic_widespread': self.has_geographic_correlation,
+            'concurrent_failures': self.concurrent_failures_count,
+            'affected_location': self.affected_location,
+            'status': self.status,
+            'priority': self.priority,
+            'assign_team': self.assign_team
+        }
+    
+    def get_user_impact_analysis(self) -> dict:
+        """Get detailed user impact analysis"""
+        if not isinstance(self.failure_details, dict):
+            return {'available': False}
+        
+        user_behavior = self.failure_details.get('user_behavior', {})
+        if not isinstance(user_behavior, dict):
+            return {'available': False}
+        
+        return {
+            'available': True,
+            'pattern': user_behavior.get('pattern', 'unknown'),
+            'behavior_trend': user_behavior.get('behavior_trend', 'unknown'),
+            'user_value_tier': user_behavior.get('user_value_tier', 'unknown'),
+            'suggested_action': user_behavior.get('suggested_action', 'standard_triage'),
+            'confidence_modifier': user_behavior.get('confidence_modifier', 0.0),
+            'severity_boost': user_behavior.get('severity_boost', False),
+            'consecutive_failures': user_behavior.get('consecutive_failures', 0)
+        }
+    
+    def get_temporal_impact_analysis(self) -> dict:
+        """Get detailed temporal impact analysis"""
+        if not isinstance(self.failure_details, dict):
+            return {'available': False}
+        
+        temporal = self.failure_details.get('temporal_analysis', {})
+        if not isinstance(temporal, dict):
+            return {'available': False}
+        
+        return {
+            'available': True,
+            'trend': temporal.get('trend', 'unknown'),
+            'pattern': temporal.get('pattern', 'unknown'),
+            'confidence_boost': temporal.get('confidence_boost', 0.0),
+            'consecutive_failures': temporal.get('consecutive_failures', 0)
+        }
+    
+    def get_geographic_impact_analysis(self) -> dict:
+        """Get detailed geographic impact analysis"""
+        if not isinstance(self.failure_details, dict):
+            return {'available': False}
+        
+        geo = self.failure_details.get('geographic_analysis', {})
+        if not isinstance(geo, dict):
+            return {'available': False}
+        
+        return {
+            'available': True,
+            'is_widespread': geo.get('is_widespread', False),
+            'concurrent_count': geo.get('concurrent_count', 0),
+            'affected_isp': geo.get('affected_isp', 'Unknown'),
+            'affected_city': geo.get('affected_city', 'Unknown'),
+            'confidence_boost': geo.get('confidence_boost', 0.0)
+        }
+    
+    def requires_immediate_action(self) -> bool:
+        """Check if ticket requires immediate action"""
+        return (
+            self.severity_score >= 8 or
+            self.is_deteriorating_user or
+            (self.is_reliable_user_affected and self.is_premium_user) or
+            self.has_geographic_correlation
+        )
+    
+    def get_escalation_recommendation(self) -> dict:
+        """Get escalation recommendation based on multi-layer analysis"""
+        should_escalate = False
+        reasons = []
+        urgency = 'normal'
+        
+        # Check severity
+        if self.severity_score >= 8:
+            should_escalate = True
+            reasons.append(f"Critical severity ({self.severity_score}/10)")
+            urgency = 'critical'
+        
+        # Check user impact
+        if self.is_deteriorating_user:
+            should_escalate = True
+            reasons.append("Deteriorating user experience detected")
+            if urgency == 'normal':
+                urgency = 'high'
+        
+        if self.is_reliable_user_affected and self.is_premium_user:
+            should_escalate = True
+            reasons.append("Premium reliable user affected")
+            if urgency == 'normal':
+                urgency = 'high'
+        
+        # Check geographic impact
+        if self.has_geographic_correlation:
+            should_escalate = True
+            reasons.append(f"Widespread issue: {self.concurrent_failures_count} concurrent failures")
+            if urgency != 'critical':
+                urgency = 'high'
+        
+        # Check temporal patterns
+        if self.temporal_pattern == 'service_degradation':
+            should_escalate = True
+            reasons.append("Service degradation pattern detected")
+            if urgency == 'normal':
+                urgency = 'high'
+        
+        return {
+            'should_escalate': should_escalate,
+            'urgency': urgency,
+            'reasons': reasons,
+            'recommended_team': self.assign_team,
+            'confidence': self.confidence_score
+        }
 # ============================================================================
 # UNIFIED PIPELINE SUPPORT MODELS
 # ============================================================================
@@ -699,6 +972,107 @@ class UnifiedDataManager:
         return round((success_logs / total_logs) * 100, 2)
     
     @staticmethod
+    def get_enhanced_ticket_statistics() -> Dict[str, Any]:
+        """Get enhanced ticket statistics with multi-layer diagnostics"""
+        try:
+            from django.db.models import Count, Avg, Q
+            
+            tickets = Ticket.objects.all()
+            total = tickets.count()
+            
+            if total == 0:
+                return {
+                    'total': 0,
+                    'message': 'No tickets available'
+                }
+            
+            # Severity distribution
+            severity_dist = {
+                'critical': tickets.filter(severity_score__gte=8).count(),
+                'high': tickets.filter(severity_score__gte=6, severity_score__lt=8).count(),
+                'medium': tickets.filter(severity_score__gte=4, severity_score__lt=6).count(),
+                'low': tickets.filter(severity_score__lt=4).count()
+            }
+            
+            # Confidence distribution
+            confidence_dist = {
+                'high': tickets.filter(confidence_score__gte=0.8).count(),
+                'medium': tickets.filter(confidence_score__gte=0.6, confidence_score__lt=0.8).count(),
+                'low': tickets.filter(confidence_score__lt=0.6).count()
+            }
+            
+            # User impact analysis
+            deteriorating_users = sum(1 for t in tickets if t.is_deteriorating_user)
+            reliable_users_affected = sum(1 for t in tickets if t.is_reliable_user_affected)
+            premium_users_affected = sum(1 for t in tickets if t.is_premium_user)
+            
+            # Geographic impact
+            widespread_issues = sum(1 for t in tickets if t.has_geographic_correlation)
+            
+            # Temporal patterns
+            service_degradation = sum(
+                1 for t in tickets 
+                if t.temporal_pattern == 'service_degradation'
+            )
+            
+            # Averages
+            avg_confidence = tickets.aggregate(Avg('confidence_score'))['confidence_score__avg'] or 0
+            avg_severity = tickets.aggregate(Avg('severity_score'))['severity_score__avg'] or 0
+            
+            # Tickets requiring immediate action
+            immediate_action_needed = sum(1 for t in tickets if t.requires_immediate_action())
+            
+            return {
+                'total': total,
+                'by_severity': severity_dist,
+                'by_confidence': confidence_dist,
+                'averages': {
+                    'confidence': round(avg_confidence, 2),
+                    'severity': round(avg_severity, 1)
+                },
+                'user_impact': {
+                    'deteriorating_users': deteriorating_users,
+                    'reliable_users_affected': reliable_users_affected,
+                    'premium_users_affected': premium_users_affected
+                },
+                'patterns': {
+                    'widespread_issues': widespread_issues,
+                    'service_degradation': service_degradation
+                },
+                'actionable': {
+                    'immediate_action_needed': immediate_action_needed,
+                    'percentage': round((immediate_action_needed / total) * 100, 1)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting enhanced ticket statistics: {e}")
+            return {'error': str(e)}
+    
+    @staticmethod
+    def get_critical_tickets_for_review() -> List[Ticket]:
+        """Get tickets that need immediate review"""
+        try:
+            tickets = Ticket.objects.filter(
+                Q(severity_score__gte=8) |
+                Q(confidence_score__gte=0.8, severity_score__gte=6)
+            ).exclude(
+                status__in=['resolved', 'closed']
+            ).order_by('-severity_score', '-confidence_score', '-created_at')
+            
+            # Additional filtering using properties
+            critical_tickets = [
+                t for t in tickets 
+                if t.requires_immediate_action()
+            ]
+            
+            return critical_tickets
+            
+        except Exception as e:
+            logger.error(f"Error getting critical tickets: {e}")
+            return []
+        
+    @staticmethod
     def cleanup_old_batches(days=7):
         """Cleanup old processing batches and logs"""
         cutoff_date = timezone.now() - timezone.timedelta(days=days)
@@ -712,6 +1086,8 @@ class UnifiedDataManager:
         old_batches.delete()
         
         return count
+    
+    
 
 # ============================================================================
 # UTILITY FUNCTIONS
