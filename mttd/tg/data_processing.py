@@ -31,14 +31,12 @@ import psutil
 from django.db import transaction
 from django.utils import timezone
 from django.core import serializers
-
-from .mongo_service import test_mongodb_connection
 from .operation.ticket_engine import AutoTicketMVP
 from .mongo_service import test_mongodb_connection, fetch_collections, save_tickets
 # Import existing functions to prevent duplicacy
 try:
     from .models import Session, KPI, Advancetags, Ticket
-    from .data_validation import ComprehensiveDataValidator, create_data_validator
+    from .data_validation import create_data_validator, ComprehensiveDataValidator
 except ImportError:
     logger = logging.getLogger(__name__)
     logger.warning("Could not import some dependencies")
@@ -75,15 +73,15 @@ class FlexibleColumnMapper:
     def __init__(self):
         # Session mappings
         self.session_mappings = {
-            'session_id': {
-                'exact': ['session_id', 'Session ID', 'Session_id', 'Session Id'],
-                'contains': ['session', 'session_id'],
-                'patterns': [r'session.*id', r'id.*session']
-            },
             'viewer_id': {
                 'exact': ['viewer_id', 'Viewer ID', 'viewerid', 'ViewerID'],
                 'contains': ['viewer', 'viewer_id'],
                 'patterns': [r'viewer.*id', r'id.*viewer']
+            },
+            'session_id': {
+                'exact': ['session_id', 'Session ID', 'Session_id', 'Session Id'],
+                'contains': ['session', 'session_id'],
+                'patterns': [r'session.*id', r'id.*session']
             },
             'asset_name': {
                 'exact': ['asset_name', 'Asset Name', 'assetname', 'channel', 'Channel'],
@@ -143,6 +141,11 @@ class FlexibleColumnMapper:
         
         # Advancetags mappings
         self.advancetags_mappings = {
+            'viewer_id': {
+                'exact': ['viewer_id', 'Viewer ID', 'viewerid', 'ViewerID'],
+                'contains': ['viewer', 'viewer_id'],
+                'patterns': [r'viewer.*id', r'id.*viewer']
+            },
             'session_id': {
                 'exact': ['session_id', 'Session ID', 'sessionid', 'Session Id'],
                 'contains': ['session'],
@@ -181,65 +184,129 @@ class FlexibleColumnMapper:
         }
     
     def flexible_map_columns(self, df: pd.DataFrame, data_type: str) -> pd.DataFrame:
-        """Apply flexible column mapping based on data type"""
+        """
+        FIXED: Apply flexible column mapping with PROPER detection
+
+        Flow:
+        1. Check if columns are already in standard format (viewer_id, session_id)
+        2. If not, apply flexible mapping
+        3. Verify critical columns exist after mapping
+        """
         if df is None or df.empty:
             logger.warning(f"Empty dataframe provided for {data_type} mapping")
             return df
 
-        logger.info(f"=== MAPPING {data_type.upper()} ===")
+        logger.info("=" * 70)
+        logger.info(f"🔄 COLUMN MAPPING: {data_type.upper()}")
+        logger.info("=" * 70)
         logger.info(f"Input columns: {list(df.columns)}")
 
         if data_type == 'sessions':
             mapping_dict = self.session_mappings
+            critical_columns = ['viewer_id', 'session_id', 'asset_name', 'status']
         elif data_type == 'kpi_data':
             mapping_dict = self.kpi_mappings
+            critical_columns = ['timestamp', 'plays']
         elif data_type == 'advancetags':
             mapping_dict = self.advancetags_mappings
+            critical_columns = ['viewer_id', 'session_id']
         else:
             logger.warning(f"Unknown data type: {data_type}")
             return df
 
-        # Create column mapping
+        # ✅ STEP 1: Check if columns are ALREADY in standard format
+        already_standard = []
+        for standard_name in mapping_dict.keys():
+            if standard_name in df.columns:
+                already_standard.append(standard_name)
+
+        if already_standard:
+            logger.info(f"✅ Found {len(already_standard)} columns already in standard format:")
+            for col in already_standard:
+                logger.info(f"   - {col}")
+
+        # ✅ STEP 2: Build column mapping for non-standard columns
         column_map = {}
         available_columns = df.columns.tolist()
 
         for standard_name, match_config in mapping_dict.items():
+            # Skip if already in standard format
+            if standard_name in df.columns:
+                continue
+            
+            # Find matching column
             mapped_column = self._find_column_flexible(available_columns, match_config)
             if mapped_column:
                 column_map[mapped_column] = standard_name
-                logger.info(f"Mapped: '{mapped_column}' -> '{standard_name}'")
+                logger.info(f"🔀 Mapping: '{mapped_column}' → '{standard_name}'")
 
-        # Apply mapping
+        # ✅ STEP 3: Apply mapping
         if column_map:
             df_mapped = df.rename(columns=column_map)
-            logger.info(f"Successfully mapped {len(column_map)} columns for {data_type}")
-            return df_mapped
+            logger.info(f"✅ Mapped {len(column_map)} columns")
         else:
-            logger.warning(f"No columns mapped for {data_type}")
-            # RETURN ORIGINAL DF INSTEAD OF FAILING
-            return df
+            df_mapped = df
+            if not already_standard:
+                logger.warning(f"⚠️ No mapping applied and no standard columns found!")
+            else:
+                logger.info(f"✅ All columns already in standard format - no mapping needed")
+
+        # ✅ STEP 4: CRITICAL VERIFICATION for sessions
+        if data_type == 'sessions':
+            logger.info("🔍 CRITICAL COLUMN VERIFICATION:")
+            for critical_col in critical_columns:
+                exists = critical_col in df_mapped.columns
+                symbol = "✅" if exists else "❌"
+                logger.info(f"   {symbol} {critical_col}: {exists}")
+
+                if exists and critical_col in ['viewer_id', 'session_id']:
+                    sample_values = df_mapped[critical_col].dropna().unique()[:3].tolist()
+                    logger.info(f"      Sample values: {sample_values}")
+
+            # CRITICAL ERROR if viewer_id missing
+            if 'viewer_id' not in df_mapped.columns:
+                logger.error("=" * 70)
+                logger.error("❌ CRITICAL ERROR: viewer_id column NOT FOUND after mapping!")
+                logger.error(f"Available columns: {list(df_mapped.columns)}")
+                logger.error("Viewer-first architecture requires viewer_id!")
+                logger.error("=" * 70)
+
+        logger.info(f"Output columns: {list(df_mapped.columns)[:10]}")
+        logger.info("=" * 70)
+
+        return df_mapped
 
     def _find_column_flexible(self, available_columns: List[str], match_config: Dict[str, List]) -> Optional[str]:
-        """Find matching column using flexible patterns"""
-        # Try exact matches first
+        """ENHANCED: Find matching column with detailed logging"""
+
+        # Try exact matches first (case-insensitive)
         for exact_name in match_config.get('exact', []):
             for col in available_columns:
-                if str(col).lower() == str(exact_name).lower():
+                col_clean = str(col).lower().strip()
+                exact_clean = str(exact_name).lower().strip()
+                if col_clean == exact_clean:
+                    logger.debug(f"✅ Exact match: '{col}' == '{exact_name}'")
                     return col
 
         # Try contains matches
         for contains_text in match_config.get('contains', []):
+            contains_clean = str(contains_text).lower().strip()
             for col in available_columns:
-                if contains_text.lower() in str(col).lower():
+                col_clean = str(col).lower().strip()
+                if contains_clean in col_clean:
+                    logger.debug(f"✅ Contains match: '{col}' contains '{contains_text}'")
                     return col
 
         # Try pattern matches
         for pattern in match_config.get('patterns', []):
             for col in available_columns:
-                if re.search(pattern, str(col).lower(), re.IGNORECASE):
+                col_clean = str(col).lower().strip()
+                if re.search(pattern, col_clean, re.IGNORECASE):
+                    logger.debug(f"✅ Pattern match: '{col}' matches '{pattern}'")
                     return col
 
         return None
+
 
 # ============================================================================
 # SMART DATA CLEANER
@@ -617,7 +684,7 @@ class FlexibleUnifiedDataProcessor:
                     "success": False, 
                     "error": "No data found in MongoDB collections. Make sure data is loaded into Django models.",
                     "processing_type": "mongodb_django_orm",
-                    "datacounts": {"sessions": 0, "kpi_data": 0, "advancetags": 0}
+                    "data_counts": {"sessions": 0, "kpi_data": 0, "advancetags": 0}
                 }
 
             # Step 2: LIGHT PROCESSING - only column mapping (as designed)
@@ -631,7 +698,7 @@ class FlexibleUnifiedDataProcessor:
 
                     # Filter by channels if specified
                     if target_channels and datatype in ['sessions', 'advancetags']:
-                        df_mapped = self.filter_by_channels(df_mapped, target_channels)
+                        df_mapped = self._filter_by_channels(df_mapped, target_channels)
 
                     processed_data[datatype] = df_mapped
                     logger.info(f"✅ Processed {datatype}: {len(df_mapped)} records")
@@ -661,7 +728,7 @@ class FlexibleUnifiedDataProcessor:
                 "session_ids_processed": len(session_ids),
                 "tickets_generated": tickets_generated,
                 "target_channels": target_channels or [],
-                "datacounts": {k: len(v) for k, v in processed_data.items()},
+                "data_counts": {k: len(v) for k, v in processed_data.items()},
                 "flexible_processing_used": True,
                 "django_orm_used": True,  # Flag to indicate Django ORM approach
                 "backend": "django_mongodb_backend"
@@ -787,83 +854,155 @@ class FlexibleUnifiedDataProcessor:
             return filtered_df
         
         return df
-        
     # Debug Session ID Values - Add this to your _extract_session_ids function
 
     def _extract_session_ids(self, data: Dict[str, pd.DataFrame]) -> List[str]:
-        """Extract session IDs - SIMPLIFIED"""
+        """
+        FIXED: Extract session IDs directly from sessions DataFrame
+        No viewer grouping - just direct extraction
+        """
         if 'sessions' not in data or data['sessions'].empty:
             logger.warning("No sessions data")
             return []
 
         df = data['sessions']
 
-        for col in ['session_id', 'Session ID', 'sessionid', 'Session Id']:
+        logger.info("=" * 70)
+        logger.info("📋 EXTRACTING SESSION IDs (Direct Approach)")
+        logger.info("=" * 70)
+        logger.info(f"Total sessions: {len(df)}")
+        logger.info(f"Available columns: {list(df.columns)[:10]}")
+
+        # ✅ FIXED: Direct extraction - no viewer grouping
+        session_id_col = None
+
+        # Try standard column names
+        for col in ['session_id', 'Session ID', 'Session Id', 'sessionid', 'SessionID']:
             if col in df.columns:
-                # Simple validation only
-                values = df[col].dropna().astype(str)
-                valid = [v.strip() for v in values 
-                        if v.strip() and v.strip().lower() != 'nan']
+                session_id_col = col
+                logger.info(f"✅ Found session_id column: '{col}'")
+                break
+            
+        if not session_id_col:
+            logger.error(f"❌ No session_id column found. Columns: {list(df.columns)}")
+            return []
 
-                if valid:
-                    logger.info(f"Extracted {len(valid)} session IDs from '{col}'")
-                    return list(set(valid))
+        # Extract and validate session IDs
+        values = df[session_id_col].dropna().astype(str)
+        valid_ids = [v.strip() for v in values 
+                     if v.strip() and v.strip().lower() not in ['nan', 'none', '', 'null']]
 
-        logger.error(f"No session ID column found. Columns: {list(df.columns)}")
-        return []
+        unique_ids = list(set(valid_ids))
+
+        logger.info(f"✅ Extracted {len(unique_ids)} unique session IDs")
+        logger.info(f"📋 Sample IDs: {unique_ids[:5]}")
+        logger.info("=" * 70)
+
+        return unique_ids
 
     def _generate_session_tickets_flexible(self, session_data: Dict[str, pd.DataFrame], 
-                                      target_channels: List[str] = None) -> int:
-        """Generate tickets from processed data using common save function"""
+                                  target_channels: List[str] = None) -> int:
+        """
+        FIXED: Session-first ticket generation with VERIFIED column mapping
+        """
         try:
-            logger.info("=== Starting Session-Based Ticket Generation ===")
-
+            logger.info("=" * 70)
+            logger.info("🎫 TICKET GENERATION: Session-First Architecture")
+            logger.info("=" * 70)
+    
             if session_data['sessions'].empty:
-                logger.warning("No session data available for ticket generation")
+                logger.warning("❌ No session data available")
                 return 0
-
-            # Create ticket engine
+    
+            # ✅ STEP 1: Apply column mapping
+            logger.info("📄 Step 1: Applying column mapping...")
+            sessions_mapped = self.mapper.flexible_map_columns(
+                session_data['sessions'], 'sessions'
+            )
+    
+            # ✅ CRITICAL: Verify column mapping worked
+            logger.info("=" * 70)
+            logger.info("🔍 COLUMN MAPPING VERIFICATION")
+            logger.info("=" * 70)
+            logger.info(f"Before mapping: {list(session_data['sessions'].columns)[:10]}")
+            logger.info(f"After mapping:  {list(sessions_mapped.columns)[:10]}")
+            
+            # Check for critical columns after mapping
+            critical_cols = {
+                'session_id': any('session' in str(c).lower() and 'id' in str(c).lower() 
+                                for c in sessions_mapped.columns),
+                'viewer_id': any('viewer' in str(c).lower() and 'id' in str(c).lower() 
+                               for c in sessions_mapped.columns),
+                'status': any('status' in str(c).lower() for c in sessions_mapped.columns)
+            }
+            
+            logger.info("Critical columns present:")
+            for col, present in critical_cols.items():
+                symbol = "✅" if present else "⚠️"
+                logger.info(f"  {symbol} {col}: {present}")
+            
+            if not critical_cols['session_id']:
+                logger.error("❌ CRITICAL: No session_id column after mapping!")
+                logger.error(f"Available columns: {list(sessions_mapped.columns)}")
+                return 0
+            
+            logger.info("=" * 70)
+    
+            # ✅ STEP 2: Apply mapping to advancetags (if available)
+            logger.info("📄 Step 2: Mapping advancetags...")
+            advancetags_mapped = pd.DataFrame()
+            if not session_data.get('advancetags', pd.DataFrame()).empty:
+                advancetags_mapped = self.mapper.flexible_map_columns(
+                    session_data['advancetags'], 'advancetags'
+                )
+                logger.info(f"  ✅ Mapped {len(advancetags_mapped)} advancetags records")
+    
+            # ✅ STEP 3: Create ticket engine with MAPPED data
+            logger.info("📄 Step 3: Creating ticket engine...")
             engine = AutoTicketMVP(
-                df_sessions=session_data['sessions'],
-                df_advancetags=session_data.get('advancetags', pd.DataFrame()),
+                df_sessions=sessions_mapped,
+                df_advancetags=advancetags_mapped,
                 target_channels=target_channels
             )
-
-            # Generate tickets
-            tickets_data = engine.process()
-
-
-            if not tickets_data:
-                logger.warning("No tickets generated by ticket engine")
-                return 0
-
-            logger.info(f"Generated {len(tickets_data)} tickets from engine")
-
-            # Prepare tickets for bulk save
-            prepared_tickets = self._prepare_tickets_for_save(tickets_data, session_data['sessions'])
-
-            if not prepared_tickets:
-                logger.warning("No valid tickets prepared for saving")
-                return 0
-
-            # Use common save function from mongo_service
-            tickets_saved = save_tickets(prepared_tickets)
-
-            logger.info(f"Successfully saved {tickets_saved} tickets")
-            return tickets_saved
-
-        except Exception as e:
-            logger.error(f"Error in ticket generation: {e}")
-            return 0
     
+            # ✅ STEP 4: Generate tickets
+            logger.info("📄 Step 4: Generating tickets...")
+            tickets = engine.process()
+    
+            if not tickets:
+                logger.warning("⚠️ No tickets generated")
+                return 0
+    
+            # ✅ STEP 5: Prepare tickets for save
+            logger.info("📄 Step 5: Preparing tickets for save...")
+            prepared_tickets = self._prepare_tickets_for_save(tickets, sessions_mapped)
+    
+            if not prepared_tickets:
+                logger.warning("⚠️ No valid tickets to save")
+                return 0
+    
+            # ✅ STEP 6: Save tickets
+            logger.info("📄 Step 6: Saving tickets...")
+            tickets_saved = save_tickets(prepared_tickets)
+    
+            logger.info(f"✅ Successfully saved {tickets_saved} tickets")
+            logger.info("=" * 70)
+            return tickets_saved
+    
+        except Exception as e:
+            logger.error(f"❌ Ticket generation failed: {e}", exc_info=True)
+            return 0
+ 
     def _prepare_tickets_for_save(self, tickets_data: List[Dict[str, Any]], 
-                         sessions_df: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Prepare tickets - SIMPLIFIED"""
+                     sessions_df: pd.DataFrame) -> List[Dict[str, Any]]:
+        """Prepare tickets with FULL enhanced structure preservation"""
         prepared = []
+
+        logger.info(f"Preparing {len(tickets_data)} tickets for save with enhanced structure")
 
         for ticket in tickets_data:
             try:
-                # DIRECT extraction - no complex fallbacks
+                # Extract session_id
                 session_id = ticket.get('session_id')
 
                 if not session_id:
@@ -877,7 +1016,13 @@ class FlexibleUnifiedDataProcessor:
                     logger.warning(f"Invalid session_id: '{session_id}'")
                     continue
                 
-                prepared.append({
+                # Extract enhanced fields
+                failure_details = ticket.get('failure_details', {})
+                context_data = ticket.get('context_data', {})
+
+                # Prepare ticket with full enhanced structure
+                prepared_ticket = {
+                    
                     'session_id': session_id,
                     'ticket_id': ticket.get('ticket_id', f"TKT_{session_id}"),
                     'title': ticket.get('title', 'Auto-generated Ticket'),
@@ -886,20 +1031,57 @@ class FlexibleUnifiedDataProcessor:
                     'status': ticket.get('status', 'new'),
                     'assign_team': ticket.get('assign_team', 'technical'),
                     'issue_type': ticket.get('issue_type', 'video_start_failure'),
-                    'confidence_score': self._extract_confidence_score(ticket),
-                    'context_data': ticket.get('context_data', {}),
-                    'failure_details': ticket.get('failure_details', {}),
+
+                    # ENHANCED: Include confidence and severity
+                    'confidence_score': ticket.get('confidence_score', 0.6),
+                    'severity_score': ticket.get('severity_score', failure_details.get('severity_score', 5)),
+
+                    # ENHANCED: Preserve complete failure_details structure
+                    'failure_details': {
+                        'root_cause': failure_details.get('root_cause', 'Technical Investigation Needed'),
+                        'confidence': failure_details.get('confidence', 0.6),
+                        'confidence_percentage': failure_details.get('confidence_percentage', 60),
+                        'evidence': failure_details.get('evidence', ''),
+                        'failure_type': failure_details.get('failure_type', 'VSF-T'),
+                        'severity_score': failure_details.get('severity_score', 5),
+                        'severity_label': failure_details.get('severity_label', 'MEDIUM'),
+
+                        # ENHANCED: Multi-layer diagnostic data
+                        'user_behavior': failure_details.get('user_behavior', {}),
+                        'temporal_analysis': failure_details.get('temporal_analysis', {}),
+                        'geographic_analysis': failure_details.get('geographic_analysis', {})
+                    },
+
+                    # ENHANCED: Context and actions
+                    'context_data': {
+                        'asset_name': context_data.get('asset_name', 'Unknown'),
+                        'viewer_id': context_data.get('viewer_id', 'Unknown'),
+                        'failure_time': context_data.get('failure_time'),
+                        'deep_link': context_data.get('deep_link', '')
+                    },
+
                     'suggested_actions': ticket.get('suggested_actions', []),
+                    'alerts': ticket.get('alerts', []),
                     'data_source': 'auto'
-                })
+                }
+
+                prepared.append(prepared_ticket)
 
             except Exception as e:
                 logger.error(f"Error preparing ticket: {e}")
                 continue
             
-        logger.info(f"Prepared {len(prepared)}/{len(tickets_data)} tickets")
-        return prepared
+        logger.info(f"Prepared {len(prepared)}/{len(tickets_data)} tickets with enhanced structure")
 
+        # Log sample of prepared ticket structure
+        if prepared:
+            sample = prepared[0]
+            logger.info(f"Sample ticket structure - Root cause: {sample['failure_details'].get('root_cause')}, "
+                       f"Confidence: {sample['confidence_score']:.2f}, "
+                       f"Severity: {sample['severity_score']}/10")
+
+        return prepared
+    
     def _extract_session_id_for_ticket(self, ticket_info: Dict[str, Any],
                                       sessions_df: pd.DataFrame) -> Optional[str]:
         """Extract valid session ID from ticket info or session data"""
@@ -923,34 +1105,7 @@ class FlexibleUnifiedDataProcessor:
 
         logger.warning("Could not extract valid session ID from ticket or sessions data")
         return None
-
-    def _extract_confidence_score(self, ticket_info: Dict[str, Any]) -> float:
-        """Extract confidence score with proper defaults"""
-
-        # Try direct confidence_score field
-        if 'confidence_score' in ticket_info:
-            try:
-                score = float(ticket_info['confidence_score'])
-                # Ensure score is between 0 and 1
-                return max(0.0, min(1.0, score))
-            except (ValueError, TypeError):
-                pass
             
-        # Try from failure_details confidence mapping
-        if 'failure_details' in ticket_info and isinstance(ticket_info['failure_details'], dict):
-            confidence_text = ticket_info['failure_details'].get('confidence', 'Medium')
-            confidence_map = {
-                'High': 0.9,
-                'high': 0.9,
-                'Medium': 0.7,
-                'medium': 0.7,
-                'Low': 0.5,
-                'low': 0.5
-            }
-            return confidence_map.get(confidence_text, 0.6)
-
-        # Default confidence score
-        return 0.6
     def _extract_session_id_from_ticket(self, ticket_info: Dict[str, Any],
                                        sessions_df: pd.DataFrame) -> Optional[str]:
         """Extract valid session ID from ticket info or session data"""
