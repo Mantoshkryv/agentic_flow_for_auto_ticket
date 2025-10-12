@@ -23,6 +23,7 @@ from django.utils import timezone
 from django.db.models import Q, Count
 from datetime import datetime, timedelta
 import time
+import json 
 from .mongo_service import get_mongodb_service, test_mongodb_connection, get_mongodb_stats
 
 def api_data_status(request):
@@ -94,11 +95,13 @@ def dashboard_view(request):
         
         # Weekly trend data
         weekly_tickets = []
+        today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
         for i in range(7):
-            date = (timezone.now() - timedelta(days=6-i)).date()
-            count = Ticket.objects.filter(created_at__date=date).count()
-            weekly_tickets.append({'date': date.strftime('%m/%d'), 'count': count})
-        
+            start_date = today - timedelta(days=6-i)
+            end_date = start_date + timedelta(days=1)
+            count = Ticket.objects.filter(created_at__gte=start_date, created_at__lt=end_date).count()
+            weekly_tickets.append({'date': start_date.strftime('%m/%d'), 'count': count})
+
         # Recent tickets
         recent_tickets = Ticket.objects.order_by('-created_at')[:10]
         
@@ -145,78 +148,7 @@ def dashboard_view(request):
             'mongodb_connected': False,
             'error': str(e)
         })
-    
-#def dashboard_view(request):
-#    """FIXED: Dashboard with Django MongoDB integration"""
-#    try:
-#        # Test Django MongoDB connection  
-#        mongodb_status = test_mongodb_connection()
-#        mongodb_stats = get_mongodb_stats()
-#        
-#        # Get Django model stats
-#        stats = UnifiedDataManager.get_data_statistics()
-#        
-#        # Merge with MongoDB stats
-#        if mongodb_status["connected"]:
-#            stats["mongodb_collections"] = mongodb_status["collections"]
-#            stats["mongodb_detailed"] = mongodb_stats
-#        
-#        # Get recent processing activity
-#        recent_ingestions = DataIngestionLog.objects.order_by('-started_at')[:10]
-#        
-#        # Enhanced ticket statistics
-#        ticket_stats = Ticket.objects.aggregate(
-#            total=Count('id'),
-#            new=Count('id', filter=Q(status='new')),
-#            in_progress=Count('id', filter=Q(status='in_progress')),
-#            resolved=Count('id', filter=Q(status='resolved')),
-#            high_priority=Count('id', filter=Q(priority='high')),
-#            critical=Count('id', filter=Q(priority='critical')),
-#            session_based=Count('id', filter=Q(session_id__isnull=False)),
-#            high_confidence=Count('id', filter=Q(confidence_score__gte=0.8))
-#        )
-#        
-#        # Processing metrics
-#        processing_metrics = {
-#            "total_batches": DataIngestionLog.objects.count(),
-#            "successful_batches": DataIngestionLog.objects.filter(status='success').count(),
-#            "failed_batches": DataIngestionLog.objects.filter(status='failed').count(),
-#            "avg_processing_time": _calculate_avg_processing_time(),
-#            "recent_success_rate": _calculate_recent_success_rate()
-#        }
-#        
-#        context = {
-#            "stats": stats,
-#            "ticket_stats": ticket_stats,
-#            "processing_metrics": processing_metrics,
-#            "recent_ingestions": recent_ingestions,
-#            "can_ingest_mongodb": mongodb_status["connected"],
-#            "mongodb_connected": mongodb_status["connected"],
-#            "mongodb_status": mongodb_status,
-#            "mongodb_stats": mongodb_stats,
-#            "can_upload_files": True,
-#            "session_only_mode": True,
-#            "flexible_processing": True,
-#            "django_mongodb_backend": True  # Indicate we're using Django MongoDB backend
-#        }
-#        
-#        return render(request, "tg/dashboard.html", context)
-#        
-#    except Exception as e:
-#        logger.error(f"❌ Dashboard error: {e}", exc_info=True)
-#        messages.error(request, f"Dashboard loading error: {str(e)}")
-#        
-#        # Fallback context
-#        mongodb_status = {"connected": False, "error": str(e)}
-#        context = {
-#            "stats": {"sessions": {"total": 0}, "tickets": {"total": 0}, "kpi": {"total": 0}, "advancetags": {"total": 0}},
-#            "recent_ingestions": [],
-#            "mongodb_connected": False,
-#            "mongodb_status": mongodb_status,
-#            "error": str(e)
-#        }
-#        return render(request, "tg/dashboard.html", context)
-#
+ 
 ## ============================================================================
 ## ENHANCED FILE UPLOAD PROCESSING - MAINTAIN EXISTING FUNCTION NAME
 # ============================================================================
@@ -524,14 +456,14 @@ def process_mongodb_flexible_enhanced(target_channels=None):
 
 # CORRECTED ticket_list VIEW FUNCTION
 # FIXED views.py functions - Replace the existing functions with these
-
 def ticket_list(request):
-    """FIXED ticket list - corrected field references and search"""
+    """ENHANCED ticket list with root_cause/issue filter"""
     try:
         # Get filter parameters - matching what template expects
         current_search = request.GET.get('search', '').strip()
         current_status = request.GET.get('status', '')
         current_priority = request.GET.get('priority', '')
+        current_root_cause = request.GET.get('root_cause', '')  # NEW FILTER
         per_page = request.GET.get('per_page', '25')
         
         # Build queryset for displayed tickets
@@ -543,59 +475,62 @@ def ticket_list(request):
         if current_priority and current_priority != 'all':
             tickets = tickets.filter(priority=current_priority)
         
-        # FIXED SEARCH - Use correct field names from your Ticket model
+        # NEW: Apply root_cause filter
+        if current_root_cause and current_root_cause != 'all':
+            # Filter by title (which contains root cause) or issue_type
+            tickets = tickets.filter(
+                Q(title__icontains=current_root_cause) |
+                Q(issue_type__icontains=current_root_cause)
+            )
+        
+        # Search functionality
         if current_search:
             tickets = tickets.filter(
                 Q(ticket_id__icontains=current_search) |
-                Q(title__icontains=current_search) |           # Use 'title' instead of 'root_cause'
-                Q(description__icontains=current_search) |     # Add description search
+                Q(title__icontains=current_search) |
+                Q(description__icontains=current_search) |
                 Q(session_id__icontains=current_search) |
                 Q(assign_team__icontains=current_search) |
-                Q(issue_type__icontains=current_search)        # Add issue_type search
+                Q(issue_type__icontains=current_search)
             )
         
         # Order tickets by creation date (newest first)
         tickets = tickets.order_by('-created_at')
         
-        # Get status and priority choices from Ticket model safely
-        status_choices = []
+        # Get status and priority choices from Ticket model
+        current_status = []
         priority_choices = []
         
         try:
-            if hasattr(Ticket, 'STATUS_CHOICES'):
-                status_choices = [choice[0] for choice in Ticket.STATUS_CHOICES]
+            if hasattr(Ticket, 'CURRENT_STATUS'):
+                current_status = [choice[0] for choice in Ticket.CURRENT_STATUS]
             else:
-                status_choices = ['new', 'in_progress', 'resolved', 'closed']
-                
+                current_status = ['new', 'in_progress', 'resolved', 'closed']
+
             if hasattr(Ticket, 'PRIORITY_CHOICES'):
                 priority_choices = [choice[0] for choice in Ticket.PRIORITY_CHOICES]
             else:
                 priority_choices = ['low', 'medium', 'high', 'critical']
         except Exception as e:
             logger.warning(f"Could not get model choices: {e}")
-            status_choices = ['new', 'in_progress', 'resolved', 'closed']
+            current_status = ['new', 'in_progress', 'resolved', 'closed']
             priority_choices = ['low', 'medium', 'high', 'critical']
         
-        # CALCULATE REAL STATISTICS - NO FAKE DATA
+        # NEW: Get unique root causes/issues for filter dropdown
+        root_cause_choices = get_unique_root_causes()
+        
+        # CALCULATE REAL STATISTICS
         all_tickets = Ticket.objects.all()
-        
-        # Real open tickets count (not resolved or closed)
         open_tickets_count = all_tickets.exclude(status__in=['resolved', 'closed']).count()
-        
-        # Real high priority count
         high_priority_count = all_tickets.filter(priority='high').count()
-        
-        # Real teams involved count
         teams_involved = all_tickets.exclude(
             assign_team__isnull=True
         ).exclude(
             assign_team=''
         ).values_list('assign_team', flat=True).distinct().count()
         
-        # Real average response time calculation
+        # Calculate average response time
         from django.utils import timezone
-        from datetime import timedelta
-        
         resolved_tickets = all_tickets.filter(
             status__in=['resolved', 'closed'],
             resolved_at__isnull=False,
@@ -616,25 +551,23 @@ def ticket_list(request):
             if count > 0:
                 avg_seconds = total_response_seconds / count
                 
-                if avg_seconds < 3600:  # Less than 1 hour
+                if avg_seconds < 3600:
                     avg_response_time = f"{int(avg_seconds // 60)}m"
-                elif avg_seconds < 86400:  # Less than 1 day
+                elif avg_seconds < 86400:
                     hours = int(avg_seconds // 3600)
                     minutes = int((avg_seconds % 3600) // 60)
                     avg_response_time = f"{hours}h {minutes}m" if minutes > 0 else f"{hours}h"
-                else:  # 1 day or more
+                else:
                     days = int(avg_seconds // 86400)
                     hours = int((avg_seconds % 86400) // 3600)
                     avg_response_time = f"{days}d {hours}h" if hours > 0 else f"{days}d"
         
-        # PAGINATION HANDLING - Support for "show all" 
+        # PAGINATION HANDLING
         from django.core.paginator import Paginator
         
         if per_page == 'all':
-            # Show all tickets without pagination
             page_obj = tickets
             total_count = tickets.count()
-            # Add pagination-like attributes for template compatibility
             page_obj.has_other_pages = False
             page_obj.has_previous = False
             page_obj.has_next = False
@@ -642,7 +575,6 @@ def ticket_list(request):
             page_obj.end_index = total_count
             page_obj.number = 1
         else:
-            # Normal pagination
             try:
                 page_size = int(per_page)
                 if page_size not in [25, 50, 100]:
@@ -656,28 +588,19 @@ def ticket_list(request):
         
         # Complete context with ALL required variables
         context = {
-            # Paginated tickets (or all tickets if per_page='all')
             'tickets': page_obj,
-            
-            # Filter choices for dropdowns - REQUIRED by template
-            'status_choices': status_choices,
+            'current_status': current_status,
             'priority_choices': priority_choices,
-            
-            # Current filter values - REQUIRED individual variables (not dictionary)
+            'root_cause_choices': root_cause_choices,  # NEW
             'current_search': current_search,
             'current_status': current_status,
             'current_priority': current_priority,
-            
-            # Pagination info
+            'current_root_cause': current_root_cause,  # NEW
             'total_count': total_count,
-            
-            # REAL CALCULATED STATISTICS - NO FAKE DATA
             'open_tickets_count': open_tickets_count,
             'high_priority_count': high_priority_count,
             'teams_involved': teams_involved,
             'avg_response_time': avg_response_time,
-            
-            # Additional real statistics for enhanced display
             'total_tickets': all_tickets.count(),
             'resolved_tickets': all_tickets.filter(status='resolved').count(),
             'closed_tickets': all_tickets.filter(status='closed').count(),
@@ -692,14 +615,15 @@ def ticket_list(request):
         logger.error(f"Ticket list error: {e}", exc_info=True)
         messages.error(request, f"Error loading tickets: {e}")
         
-        # Fallback context with real empty values (not fake data)
         return render(request, "tg/ticket_list.html", {
             'tickets': [],
-            'status_choices': ['new', 'in_progress', 'resolved', 'closed'],
+            'current_status': ['new', 'in_progress', 'resolved', 'closed'],
             'priority_choices': ['low', 'medium', 'high', 'critical'],
+            'root_cause_choices': [],  # NEW
             'current_search': '',
             'current_status': '',
             'current_priority': '',
+            'current_root_cause': '',  # NEW
             'total_count': 0,
             'open_tickets_count': 0,
             'high_priority_count': 0,
@@ -710,6 +634,63 @@ def ticket_list(request):
             'closed_tickets': 0,
         })
 
+def get_unique_root_causes():
+    """Extract unique root causes from tickets for filter dropdown"""
+    try:
+        import json
+        root_causes = set()
+        
+        # Get from title field (primary source)
+        titles = Ticket.objects.exclude(
+            title__isnull=True
+        ).exclude(
+            title=''
+        ).values_list('title', flat=True).distinct()
+        
+        for title in titles:
+            if title:
+                root_causes.add(title.strip())
+        
+        # Get from issue_type field
+        issue_types = Ticket.objects.exclude(
+            issue_type__isnull=True
+        ).exclude(
+            issue_type=''
+        ).values_list('issue_type', flat=True).distinct()
+        
+        for issue in issue_types:
+            if issue:
+                root_causes.add(issue.strip())
+        
+        # Get from failure_details if available
+        failure_details_list = Ticket.objects.exclude(
+            failure_details__isnull=True
+        ).values_list('failure_details', flat=True)
+        
+        for details in failure_details_list:
+            try:
+                if isinstance(details, dict):
+                    detail_dict = details
+                elif isinstance(details, str):
+                    detail_dict = json.loads(details)
+                else:
+                    continue
+                
+                if 'root_cause' in detail_dict:
+                    root_causes.add(detail_dict['root_cause'].strip())
+                if 'issue' in detail_dict:
+                    root_causes.add(detail_dict['issue'].strip())
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                continue
+        
+        # Sort and return as list (limit to top 20 most common)
+        sorted_causes = sorted(list(root_causes))[:20]
+        return sorted_causes
+        
+    except Exception as e:
+        logger.error(f"Error getting unique root causes: {e}")
+        return []
+    
 def ticket_detail(request, ticket_id):
     """FIXED ticket detail with proper field extraction"""
     try:
@@ -720,11 +701,13 @@ def ticket_detail(request, ticket_id):
         related_session = None
         if ticket.session_id:
             try:
-                related_session = Session.objects.get(session_id=ticket.session_id)
+                # Clean session_id - remove .0 if present
+                clean_session_id = str(ticket.session_id).rstrip('.0') if '.0' in str(ticket.session_id) else str(ticket.session_id)
+                related_session = Session.objects.get(session_id=clean_session_id)
             except Session.DoesNotExist:
-                logger.warning(f"Session {ticket.session_id} not found for ticket {ticket_id}")
+                logger.warning(f"Session {clean_session_id} not found for ticket {ticket_id}")
             except Exception as e:
-                logger.error(f"Error fetching session {ticket.session_id}: {e}")
+                logger.error(f"Error fetching session {clean_session_id}: {e}")
         
         # Get related metadata if available
         related_metadata = None
@@ -922,8 +905,8 @@ def update_ticket_status(request, ticket_id):
             # Validate and update status
             if new_status:
                 try:
-                    if hasattr(Ticket, 'STATUS_CHOICES'):
-                        valid_statuses = [choice[0] for choice in Ticket.STATUS_CHOICES]
+                    if hasattr(Ticket, 'CURRENT_STATUS'):
+                        valid_statuses = [choice[0] for choice in Ticket.CURRENT_STATUS]
                     else:
                         valid_statuses = ['new', 'in_progress', 'resolved', 'closed']
                 except:
@@ -1042,158 +1025,6 @@ def update_ticket_status(request, ticket_id):
         "error": "Invalid request method. Use GET to view or POST to update."
     })
 
-@csrf_exempt
-def update_ticket_status(request, ticket_id):
-    """Complete enhanced ticket update - status, priority, team assignment"""
-    
-    if request.method == "GET":
-        # Handle GET request - redirect to ticket detail page
-        try:
-            ticket = get_object_or_404(Ticket, ticket_id=ticket_id)
-            return redirect('tg:ticket_detail', ticket_id=ticket_id)
-        except Exception as e:
-            logger.error(f"Error redirecting to ticket detail: {e}")
-            messages.error(request, f"Error loading ticket: {str(e)}")
-            return redirect('tg:ticket_list')
-    
-    elif request.method == "POST":
-        try:
-            ticket = get_object_or_404(Ticket, ticket_id=ticket_id)
-            
-            # Get all update fields
-            new_status = request.POST.get("status", "").strip()
-            new_priority = request.POST.get("priority", "").strip()
-            new_team = request.POST.get("assign_team", "").strip()
-            resolution_notes = request.POST.get("resolution_notes", "").strip()
-            
-            # Track changes
-            changes = {}
-            old_values = {}
-            
-            # Validate and update status
-            if new_status:
-                # Get valid statuses - try model choices first, fallback to common values
-                try:
-                    if hasattr(Ticket, 'STATUS_CHOICES'):
-                        valid_statuses = [choice[0] for choice in Ticket.STATUS_CHOICES]
-                    else:
-                        valid_statuses = ['new', 'in_progress', 'resolved', 'closed']
-                except:
-                    valid_statuses = ['new', 'in_progress', 'resolved', 'closed']
-                    
-                if new_status not in valid_statuses:
-                    return JsonResponse({
-                        "success": False, 
-                        "error": f"Invalid status: {new_status}. Valid options: {', '.join(valid_statuses)}"
-                    })
-                
-                if ticket.status != new_status:
-                    old_values['status'] = ticket.status
-                    ticket.status = new_status
-                    changes['status'] = new_status
-            
-            # Validate and update priority
-            if new_priority:
-                # Get valid priorities - try model choices first, fallback to common values
-                try:
-                    if hasattr(Ticket, 'PRIORITY_CHOICES'):
-                        valid_priorities = [choice[0] for choice in Ticket.PRIORITY_CHOICES]
-                    else:
-                        valid_priorities = ['low', 'medium', 'high', 'critical']
-                except:
-                    valid_priorities = ['low', 'medium', 'high', 'critical']
-                    
-                if new_priority not in valid_priorities:
-                    return JsonResponse({
-                        "success": False, 
-                        "error": f"Invalid priority: {new_priority}. Valid options: {', '.join(valid_priorities)}"
-                    })
-                
-                if ticket.priority != new_priority:
-                    old_values['priority'] = ticket.priority
-                    ticket.priority = new_priority
-                    changes['priority'] = new_priority
-            
-            # Update team assignment (can be empty to unassign)
-            if 'assign_team' in request.POST:
-                current_team = ticket.assign_team or ""
-                if current_team != new_team:
-                    old_values['assign_team'] = current_team or "Unassigned"
-                    ticket.assign_team = new_team if new_team else None
-                    changes['assign_team'] = new_team or "Unassigned"
-            
-            # Update resolution notes
-            if resolution_notes and ticket.resolution_notes != resolution_notes:
-                old_values['resolution_notes'] = ticket.resolution_notes or ""
-                ticket.resolution_notes = resolution_notes
-                changes['resolution_notes'] = "Updated"
-            
-            # Handle resolved timestamp
-            if 'status' in changes:
-                from django.utils import timezone
-                if new_status == 'resolved' and old_values.get('status') != 'resolved':
-                    ticket.resolved_at = timezone.now()
-                    changes['resolved_at'] = str(ticket.resolved_at)
-                elif new_status != 'resolved' and old_values.get('status') == 'resolved':
-                    ticket.resolved_at = None
-                    changes['resolved_at'] = "Cleared"
-            
-            # Save if there are changes
-            if changes:
-                ticket.save()
-                
-                # Create detailed change summary
-                change_details = []
-                for field, new_value in changes.items():
-                    old_val = old_values.get(field, "Unknown")
-                    if field == 'status':
-                        change_details.append(f"Status: {old_val} → {new_value}")
-                    elif field == 'priority':
-                        change_details.append(f"Priority: {old_val} → {new_value}")
-                    elif field == 'assign_team':
-                        change_details.append(f"Team: {old_val} → {new_value}")
-                    elif field == 'resolution_notes':
-                        change_details.append("Resolution notes updated")
-                    elif field == 'resolved_at':
-                        if new_value == "Cleared":
-                            change_details.append("Resolved timestamp cleared")
-                        else:
-                            change_details.append("Marked as resolved")
-                
-                success_message = f"Ticket updated successfully. {', '.join(change_details)}"
-                
-                # Log the change
-                logger.info(f"Ticket {ticket_id} updated. Changes: {changes}")
-                
-                return JsonResponse({
-                    "success": True,
-                    "message": success_message,
-                    "changes": changes,
-                    "new_status": ticket.status,
-                    "new_priority": ticket.priority,
-                    "new_team": ticket.assign_team,
-                    "session_id": ticket.session_id,
-                    "resolved_at": str(ticket.resolved_at) if ticket.resolved_at else None,
-                    "updated_at": str(ticket.updated_at)
-                })
-            else:
-                return JsonResponse({
-                    "success": True,
-                    "message": "No changes were made to the ticket",
-                    "changes": {}
-                })
-            
-        except Exception as e:
-            logger.error(f"Ticket update error for {ticket_id}: {e}", exc_info=True)
-            return JsonResponse({
-                "success": False,
-                "error": f"Failed to update ticket: {str(e)}"
-            })
-    
-    return JsonResponse({
-        "success": False, 
-        "error": "Invalid request method. Use GET to view or POST to update."
-    })
 
 # ============================================================================
 # ANALYTICS - MAINTAIN EXISTING FUNCTION NAME
