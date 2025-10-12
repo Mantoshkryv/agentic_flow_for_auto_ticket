@@ -2,8 +2,177 @@
 {% load url_extras %}
 {% block title %}{{ ticket.ticket_id }} | Ticket Details{% endblock %}
 
+{% block extra_css %}
+<style>
+/* ============================================================================
+   FIXED STATUS BADGE STYLES - PROPER COLORS FOR ALL STATES
+   ============================================================================ */
+.status-badge, .badge[class*="status-"], .badge[class*="priority-"] {
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: none;
+    white-space: nowrap;
+}
+
+/* FIXED: Status Colors - All variations handled */
+.status-new, .badge.status-new {
+    background-color: #3b82f6 !important;
+    color: white !important;
+}
+
+.status-open, .badge.status-open {
+    background-color: #8b5cf6 !important;
+    color: white !important;
+}
+
+/* CRITICAL FIX: in_progress with both underscore and hyphen variants */
+.status-in_progress, .badge.status-in_progress,
+.status-in-progress, .badge.status-in-progress,
+.status-in-progress, .badge.status-In progress {
+    background-color: #f59e0b !important;
+    color: black !important;
+}
+
+.status-pending, .badge.status-pending {
+    background-color: #eab308 !important;
+    color: white !important;
+}
+
+.status-resolved, .badge.status-resolved {
+    background-color: #10b981 !important;
+    color: white !important;
+}
+
+.status-closed, .badge.status-closed {
+    background-color: #6b7280 !important;
+    color: white !important;
+}
+
+.status-on_hold, .badge.status-on_hold,
+.status-on-hold, .badge.status-on-hold {
+    background-color: #ec4899 !important;
+    color: white !important;
+}
+
+.status-reopened, .badge.status-reopened {
+    background-color: #ef4444 !important;
+    color: white !important;
+}
+
+/* Priority Colors */
+.priority-critical, .badge.priority-critical {
+    background-color: #dc2626 !important;
+    color: white !important;
+}
+
+.priority-high, .badge.priority-high {
+    background-color: #f97316 !important;
+    color: white !important;
+}
+
+.priority-medium, .badge.priority-medium {
+    background-color: #3b82f6 !important;
+    color: white !important;
+}
+
+.priority-low, .badge.priority-low {
+    background-color: #64748b !important;
+    color: white !important;
+}
+
+/* Severity Indicators */
+.severity-critical { 
+    border-left: 4px solid #dc3545; 
+    background-color: #fff5f5;
+}
+
+.severity-high { 
+    border-left: 4px solid #fd7e14; 
+    background-color: #fff8f0;
+}
+
+.severity-medium { 
+    border-left: 4px solid #ffc107; 
+    background-color: #fffbea;
+}
+
+.severity-low { 
+    border-left: 4px solid #6c757d; 
+    background-color: #f8f9fa;
+}
+
+/* Enhanced Card Styles */
+.diagnostic-card {
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: transform 0.2s;
+}
+
+.diagnostic-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+/* Progress Bar for Confidence */
+.confidence-bar {
+    height: 24px;
+    border-radius: 12px;
+    overflow: hidden;
+    background-color: #e9ecef;
+}
+
+.confidence-bar-fill {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    font-size: 12px;
+    transition: width 0.3s ease;
+}
+
+/* Alert Pulse Animation */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.alert-pulse {
+    animation: pulse 2s infinite;
+}
+
+/* Metric Cards */
+.metric-card {
+    text-align: center;
+    padding: 1.5rem;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.metric-value {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0.5rem 0;
+}
+
+.metric-label {
+    font-size: 0.875rem;
+    opacity: 0.9;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+</style>
+{% endblock %}
+
 {% block content %}
-<!-- CLEAN HEADER SECTION -->
+<!-- HEADER SECTION -->
 <div class="row mb-4">
     <div class="col-12">
         <div class="d-flex justify-content-between align-items-center">
@@ -29,21 +198,89 @@
 </div>
 
 <div class="row">
-    <!-- MAIN TICKET DETAILS - CLEAN & ORGANIZED -->
+    <!-- MAIN CONTENT AREA -->
     <div class="col-lg-8">
+        <!-- ENHANCED SEVERITY & CONFIDENCE DISPLAY -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card border-{% if ticket.severity_score >= 8 %}danger{% elif ticket.severity_score >= 6 %}warning{% else %}info{% endif %} diagnostic-card">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted mb-2">
+                            <i class="bi bi-exclamation-triangle me-1"></i>Severity Score
+                        </h6>
+                        <h2 class="mb-2">{{ ticket.severity_score|default:5 }}/10</h2>
+                        {% if ticket.severity_score >= 8 %}
+                            <span class="badge bg-danger">CRITICAL</span>
+                        {% elif ticket.severity_score >= 6 %}
+                            <span class="badge bg-warning text-dark">HIGH</span>
+                        {% elif ticket.severity_score >= 4 %}
+                            <span class="badge bg-info">MEDIUM</span>
+                        {% else %}
+                            <span class="badge bg-secondary">LOW</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card diagnostic-card">
+                    <div class="card-body text-center">
+                        <h6 class="text-muted mb-2">
+                            <i class="bi bi-graph-up me-1"></i>Confidence Percentage
+                        </h6>
+                        {% comment %}
+                        FIXED: Proper confidence percentage calculation
+                        - ticket.confidence_score is stored as decimal (0.95)
+                        - First check failure_details.confidence_percentage (already calculated as 95)
+                        - Fallback: multiply confidence_score by 100 (0.95 * 100 = 95)
+                        - Use floatformat:0 to remove decimals
+                        {% endcomment %}
+                        {% if ticket.failure_details.confidence_percentage %}
+                            <h2 class="mb-2">{{ ticket.failure_details.confidence_percentage }}%</h2>
+                            {% with confidence_pct=ticket.failure_details.confidence_percentage %}
+                                {% if confidence_pct >= 80 %}
+                                    <span class="badge bg-success">High Confidence</span>
+                                {% elif confidence_pct >= 60 %}
+                                    <span class="badge bg-warning text-dark">Medium Confidence</span>
+                                {% else %}
+                                    <span class="badge bg-danger">Low Confidence</span>
+                                {% endif %}
+                            {% endwith %}
+                        {% elif ticket.confidence_score %}
+                            {% widthratio ticket.confidence_score 1 100 as confidence_percentage %}
+                            <h2 class="mb-2">{{ confidence_percentage }}%</h2>
+                            {% if confidence_percentage >= 80 %}
+                                <span class="badge bg-success">High Confidence</span>
+                            {% elif confidence_percentage >= 60 %}
+                                <span class="badge bg-warning text-dark">Medium Confidence</span>
+                            {% else %}
+                                <span class="badge bg-danger">Low Confidence</span>
+                            {% endif %}
+                        {% else %}
+                            <h2 class="mb-2">60%</h2>
+                            <span class="badge bg-warning text-dark">Medium Confidence</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- STATUS OVERVIEW CARD -->
-        <div class="card mb-4">
+        <div class="card mb-4 diagnostic-card">
             <div class="card-body">
                 <div class="row align-items-center">
                     <div class="col-md-3">
                         <h6 class="text-muted mb-1">Current Status</h6>
-                        <span class="badge status-{{ ticket.status }} fs-5" id="currentStatusBadge">
-                            {{ ticket.status|title }}
+                        <span class="badge status-{{ ticket.status|lower }} fs-5" id="currentStatusBadge">
+                            {% if ticket.status == 'in_progress' %}
+                                In Progress
+                            {% else %}
+                                {{ ticket.status|title }}
+                            {% endif %}
                         </span>
                     </div>
                     <div class="col-md-3">
                         <h6 class="text-muted mb-1">Priority Level</h6>
-                        <span class="badge priority-{{ ticket.priority }} fs-5" id="currentPriorityBadge">
+                        <span class="badge priority-{{ ticket.priority|lower }} fs-5" id="currentPriorityBadge">
                             {{ ticket.priority|title }}
                         </span>
                     </div>
@@ -51,7 +288,7 @@
                         <h6 class="text-muted mb-1">Assigned Team</h6>
                         <div id="currentTeam">
                             {% if ticket.assign_team %}
-                                <span class="badge bg-info fs-6">{{ ticket.assign_team }}</span>
+                                <span class="badge bg-info fs-6">{{ ticket.assign_team|title|cut:'_' }}</span>
                             {% else %}
                                 <span class="text-muted">Unassigned</span>
                             {% endif %}
@@ -65,12 +302,121 @@
             </div>
         </div>
 
+        <!-- USER BEHAVIOR ANALYSIS PANEL -->
+        {% if ticket.failure_details.user_behavior %}
+        <div class="card mb-4 diagnostic-card">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="bi bi-person-circle me-2"></i>User Behavior Analysis</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <h6 class="text-muted">Pattern Detected</h6>
+                        <p><strong>{{ ticket.failure_details.user_behavior.pattern|default:"unknown"|title|cut:"_" }}</strong></p>
+                    </div>
+                    <div class="col-md-4">
+                        <h6 class="text-muted">User Value Tier</h6>
+                        {% with tier=ticket.failure_details.user_behavior.user_value_tier|default:"unknown" %}
+                        <span class="badge {% if tier == 'premium' %}bg-danger{% elif tier == 'high_value' %}bg-warning{% else %}bg-secondary{% endif %}">
+                            {{ tier|title|cut:"_" }}
+                        </span>
+                        {% endwith %}
+                    </div>
+                    <div class="col-md-4">
+                        <h6 class="text-muted">Behavior Trend</h6>
+                        <p>
+                            {% with trend=ticket.failure_details.user_behavior.behavior_trend|default:"unknown" %}
+                            {% if trend == 'deteriorating' %}
+                                <i class="bi bi-arrow-down-circle text-danger"></i>
+                            {% elif trend == 'excellent' %}
+                                <i class="bi bi-arrow-up-circle text-success"></i>
+                            {% else %}
+                                <i class="bi bi-dash-circle text-secondary"></i>
+                            {% endif %}
+                            {{ trend|title }}
+                            {% endwith %}
+                        </p>
+                    </div>
+                </div>
+                
+                {% if ticket.failure_details.user_behavior.suggested_action %}
+                <div class="alert alert-warning mt-3">
+                    <strong><i class="bi bi-exclamation-triangle me-2"></i>Recommended Action:</strong>
+                    {{ ticket.failure_details.user_behavior.suggested_action|title|cut:"_" }}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- TEMPORAL ANALYSIS PANEL -->
+        {% if ticket.failure_details.temporal_analysis %}
+        <div class="card mb-4 diagnostic-card">
+            <div class="card-header bg-warning">
+                <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Temporal Pattern Analysis</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6 class="text-muted">Trend</h6>
+                        <p>
+                            {% with trend=ticket.failure_details.temporal_analysis.trend|default:"unknown" %}
+                            {% if trend == 'deteriorating' %}
+                                <span class="badge bg-danger">Deteriorating</span>
+                            {% elif trend == 'stable' %}
+                                <span class="badge bg-success">Stable</span>
+                            {% else %}
+                                <span class="badge bg-info">{{ trend|title }}</span>
+                            {% endif %}
+                            {% endwith %}
+                        </p>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="text-muted">Pattern</h6>
+                        <p><strong>{{ ticket.failure_details.temporal_analysis.pattern|default:"unknown"|title|cut:"_" }}</strong></p>
+                    </div>
+                </div>
+                
+                {% if ticket.failure_details.temporal_analysis.consecutive_failures %}
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-circle me-2"></i>
+                    <strong>{{ ticket.failure_details.temporal_analysis.consecutive_failures }} consecutive failures detected</strong>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- GEOGRAPHIC CORRELATION PANEL -->
+        {% if ticket.failure_details.geographic_analysis.is_widespread %}
+        <div class="card mb-4 border-danger diagnostic-card alert-pulse">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="bi bi-globe me-2"></i>Geographic Impact - WIDESPREAD ISSUE</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-danger mb-3">
+                    <strong><i class="bi bi-exclamation-triangle-fill me-2"></i>CRITICAL:</strong>
+                    {{ ticket.failure_details.geographic_analysis.concurrent_count }} concurrent failures detected in same location
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6 class="text-muted">Affected City</h6>
+                        <p><strong>{{ ticket.failure_details.geographic_analysis.affected_city|default:"Unknown" }}</strong></p>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="text-muted">Affected ISP</h6>
+                        <p><strong>{{ ticket.failure_details.geographic_analysis.affected_isp|default:"Unknown" }}</strong></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- TICKET INFORMATION CARD -->
-        <div class="card mb-4">
+        <div class="card mb-4 diagnostic-card">
             <div class="card-header">
                 <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Ticket Information</h5>
             </div>
-
             <div class="card-body">
                 <div class="row mb-3">
                     <div class="col-md-6">
@@ -92,25 +438,18 @@
                         <h6 class="text-muted">Channel</h6>
                         {% if channel_name %}
                             <p><span class="badge bg-secondary">{{ channel_name }}</span></p>
+                        {% elif ticket.context_data.asset_name %}
+                            <p><span class="badge bg-secondary">{{ ticket.context_data.asset_name }}</span></p>
                         {% else %}
                             <p class="text-muted fst-italic">Not specified</p>
                         {% endif %}
                     </div>
                     <div class="col-md-6">
-                        <h6 class="text-muted">Confidence Score</h6>
-                        {% if ticket.confidence_score %}
-                            <div class="d-flex align-items-center">
-                                <span class="me-2">{{ ticket.confidence_score|floatformat:2 }}</span>
-                                {% if ticket.confidence_score >= 0.8 %}
-                                    <span class="badge bg-success">High Confidence</span>
-                                {% elif ticket.confidence_score >= 0.5 %}
-                                    <span class="badge bg-warning text-dark">Medium Confidence</span>
-                                {% else %}
-                                    <span class="badge bg-danger">Low Confidence</span>
-                                {% endif %}
-                            </div>
+                        <h6 class="text-muted">Issue Type</h6>
+                        {% if ticket.issue_type %}
+                            <p><span class="badge bg-primary">{{ ticket.issue_type|title|cut:"_" }}</span></p>
                         {% else %}
-                            <p class="text-muted fst-italic">Not calculated</p>
+                            <p class="text-muted fst-italic">Not specified</p>
                         {% endif %}
                     </div>
                 </div>
@@ -138,62 +477,21 @@
             </div>
         </div>
 
-        <!-- DESCRIPTION CARD - PROPER PLACEMENT -->
-        <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-file-text me-2"></i>Description</h5>
-            </div>
-            <div class="card-body">
-                {% if ticket.description %}
-                    <div class="description-content" style="line-height: 1.8; font-size: 1.05rem;">
-                        {{ ticket.description|linebreaks }}
-                    </div>
-                    
-                    <!-- Show title as summary if different from description -->
-                    {% if ticket.title and ticket.title != ticket.description %}
-                        <div class="mt-3 pt-3 border-top">
-                            <h6 class="text-muted mb-2">Issue Summary</h6>
-                            <p class="mb-0 fw-semibold">{{ ticket.title }}</p>
-                        </div>
-                    {% endif %}
-                    
-                    <!-- Show issue type if meaningful -->
-                    {% if ticket.issue_type %}
-                        <div class="mt-2">
-                            <small class="text-muted">
-                                <i class="bi bi-tag me-1"></i>
-                                <strong>Type:</strong> {{ ticket.issue_type|title|cut:"_" }}
-                            </small>
-                        </div>
-                    {% endif %}
-                {% else %}
-                    <div class="alert alert-info mb-0 d-flex align-items-center">
-                        <i class="bi bi-info-circle me-2 flex-shrink-0" style="font-size: 1.5rem;"></i>
-                        <div>
-                            <strong>No detailed description available.</strong>
-                            <br><small>Review the Root Cause Analysis and Technical Details sections below for diagnostic information.</small>
-                        </div>
-                    </div>
-                {% endif %}
-            </div>
-        </div>
-
         <!-- ROOT CAUSE ANALYSIS CARD -->
-        <div class="card mb-4">
+        <div class="card mb-4 diagnostic-card">
             <div class="card-header">
                 <h5 class="mb-0"><i class="bi bi-search me-2"></i>Root Cause Analysis</h5>
             </div>
             <div class="card-body">
-    
-                {% if root_cause %}
+                {% if root_cause or ticket.failure_details.root_cause %}
                     <div class="alert alert-warning d-flex align-items-start" role="alert">
                         <i class="bi bi-exclamation-triangle me-3" style="font-size: 1.5rem;"></i>
                         <div>
                             <h6 class="alert-heading">Identified Issue</h6>
-                            <p class="mb-0">{{ root_cause }}</p>
-                            {% if evidence %}
+                            <p class="mb-0">{{ root_cause|default:ticket.failure_details.root_cause }}</p>
+                            {% if ticket.failure_details.evidence %}
                                 <hr class="my-2">
-                                <small class="text-muted"><strong>Evidence:</strong> {{ evidence }}</small>
+                                <small class="text-muted"><strong>Evidence:</strong> {{ ticket.failure_details.evidence }}</small>
                             {% endif %}
                         </div>
                     </div>
@@ -204,59 +502,45 @@
                         <p class="text-muted mb-0">Analysis may be in progress or requires manual investigation.</p>
                     </div>
                 {% endif %}
-                
-                <!-- TECHNICAL DETAILS -->
-                {% if ticket.failure_details %}
-                <div class="mt-3">
-                    <h6 class="text-muted">Technical Details</h6>
-                    <div class="accordion" id="technicalAccordion">
-                        <div class="accordion-item">
-                            <h2 class="accordion-header">
-                                <button class="accordion-button collapsed" type="button" 
-                                        data-bs-toggle="collapse" data-bs-target="#technicalDetails">
-                                    <i class="bi bi-gear me-2"></i>View Additional Technical Information
-                                </button>
-                            </h2>
-                            <div id="technicalDetails" class="accordion-collapse collapse" 
-                                 data-bs-parent="#technicalAccordion">
-                                <div class="accordion-body">
-                                    {% for key, value in ticket.failure_details.items %}
-                                        <div class="mb-2">
-                                            <strong class="text-primary">{{ key|title|cut:'_' }}:</strong>
-                                            <div class="ms-3 text-muted">{{ value }}</div>
-                                        </div>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
             </div>
         </div>
 
-        <!-- SUGGESTED ACTIONS CARD -->
-        {% if ticket.suggested_actions %}
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-lightbulb text-warning me-2"></i>Recommended Actions</h5>
-                </div>
-                <div class="card-body">
-                    <div class="list-group list-group-flush">
-                        {% for action in ticket.suggested_actions %}
-                            <div class="list-group-item d-flex align-items-start">
-                                <span class="badge bg-primary me-3">{{ forloop.counter }}</span>
-                                <div>{{ action }}</div>
-                            </div>
-                        {% endfor %}
-                    </div>
+        <!-- DESCRIPTION CARD -->
+        {% if ticket.description %}
+        <div class="card mb-4 diagnostic-card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-file-text me-2"></i>Description</h5>
+            </div>
+            <div class="card-body">
+                <div class="description-content" style="line-height: 1.8; font-size: 1.05rem;">
+                    {{ ticket.description|linebreaks }}
                 </div>
             </div>
+        </div>
+        {% endif %}
+
+        <!-- SUGGESTED ACTIONS CARD (FROM TICKET ENGINE) -->
+        {% if ticket.suggested_actions %}
+        <div class="card mb-4 diagnostic-card">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Recommended Actions</h5>
+            </div>
+            <div class="card-body">
+                <div class="list-group list-group-flush">
+                    {% for action in ticket.suggested_actions %}
+                    <div class="list-group-item d-flex align-items-start">
+                        <span class="badge bg-primary me-3">{{ forloop.counter }}</span>
+                        <div>{{ action }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
         {% endif %}
         
         <!-- RESOLUTION NOTES -->
         {% if ticket.resolution_notes %}
-        <div class="card mb-4">
+        <div class="card mb-4 diagnostic-card">
             <div class="card-header bg-success text-white">
                 <h5 class="mb-0"><i class="bi bi-check-circle me-2"></i>Resolution Notes</h5>
             </div>
@@ -267,11 +551,11 @@
         {% endif %}
     </div>
 
-    <!-- SIDEBAR - UPDATE PANEL & INFO -->
+    <!-- SIDEBAR -->
     <div class="col-lg-4">
         <!-- UPDATE TICKET PANEL -->
         {% if can_edit %}
-        <div class="card mb-4 border-primary">
+        <div class="card mb-4 border-primary diagnostic-card">
             <div class="card-header bg-primary text-white">
                 <h5 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Update Ticket</h5>
             </div>
@@ -279,7 +563,6 @@
                 <form id="ticketUpdateForm">
                     {% csrf_token %}
                     
-                    <!-- STATUS UPDATE -->
                     <div class="mb-3">
                         <label for="newStatus" class="form-label fw-bold">
                             <i class="bi bi-flag me-1"></i>Status
@@ -292,7 +575,6 @@
                         </select>
                     </div>
                     
-                    <!-- PRIORITY UPDATE -->
                     <div class="mb-3">
                         <label for="newPriority" class="form-label fw-bold">
                             <i class="bi bi-exclamation-triangle me-1"></i>Priority
@@ -303,29 +585,21 @@
                             <option value="high" {% if ticket.priority == 'high' %}selected{% endif %}>High</option>
                             <option value="critical" {% if ticket.priority == 'critical' %}selected{% endif %}>Critical</option>
                         </select>
-                        <div class="form-text">
-                            <small><strong>Low:</strong> Normal workflow | <strong>Medium:</strong> Prioritize | <strong>High:</strong> Urgent | <strong>Critical:</strong> System impact</small>
-                        </div>
                     </div>
                     
-                    <!-- TEAM ASSIGNMENT -->
                     <div class="mb-3">
                         <label for="assignedTeam" class="form-label fw-bold">
                             <i class="bi bi-people me-1"></i>Assigned Team
                         </label>
                         <select class="form-select" id="assignedTeam" name="assign_team">
                             <option value="">— Unassigned —</option>
-                            <option value="DevOps" {% if ticket.assign_team == 'DevOps' %}selected{% endif %}>DevOps</option>
-                            <option value="Backend" {% if ticket.assign_team == 'Backend' %}selected{% endif %}>Backend Team</option>
-                            <option value="Frontend" {% if ticket.assign_team == 'Frontend' %}selected{% endif %}>Frontend Team</option>
-                            <option value="QA" {% if ticket.assign_team == 'QA' %}selected{% endif %}>Quality Assurance</option>
-                            <option value="Infrastructure" {% if ticket.assign_team == 'Infrastructure' %}selected{% endif %}>Infrastructure</option>
-                            <option value="Security" {% if ticket.assign_team == 'Security' %}selected{% endif %}>Security Team</option>
-                            <option value="Data" {% if ticket.assign_team == 'Data' %}selected{% endif %}>Data Team</option>
+                            <option value="technical" {% if ticket.assign_team == 'technical' %}selected{% endif %}>Technical</option>
+                            <option value="network" {% if ticket.assign_team == 'network' %}selected{% endif %}>Network</option>
+                            <option value="content" {% if ticket.assign_team == 'content' %}selected{% endif %}>Content</option>
+                            <option value="customer_service" {% if ticket.assign_team == 'customer_service' %}selected{% endif %}>Customer Service</option>
                         </select>
                     </div>
                     
-                    <!-- RESOLUTION NOTES -->
                     <div class="mb-4">
                         <label for="resolutionNotes" class="form-label fw-bold">
                             <i class="bi bi-chat-left-text me-1"></i>Resolution Notes
@@ -334,7 +608,6 @@
                                   placeholder="Add notes about progress, resolution steps, or findings...">{{ ticket.resolution_notes }}</textarea>
                     </div>
                     
-                    <!-- ACTION BUTTONS -->
                     <div class="d-grid gap-2">
                         <button type="submit" class="btn btn-primary btn-lg">
                             <i class="bi bi-save me-1"></i>Update Ticket
@@ -359,7 +632,7 @@
         
         <!-- RELATED SESSION INFO -->
         {% if related_session %}
-        <div class="card mb-4">
+        <div class="card mb-4 diagnostic-card">
             <div class="card-header">
                 <h5 class="mb-0"><i class="bi bi-link-45deg me-2"></i>Related Session</h5>
             </div>
@@ -372,16 +645,16 @@
                 <p>{{ related_session.asset_name }}</p>
                 {% endif %}
                 
-                {% if related_session.created_at %}
-                <h6 class="text-muted">Session Created</h6>
-                <p>{{ related_session.created_at|date:"M d, Y H:i" }}</p>
+                {% if related_session.status %}
+                <h6 class="text-muted">Session Status</h6>
+                <p><span class="badge bg-secondary">{{ related_session.status }}</span></p>
                 {% endif %}
             </div>
         </div>
         {% endif %}
         
         <!-- SYSTEM STATUS -->
-        <div class="card">
+        <div class="card diagnostic-card">
             <div class="card-header">
                 <h5 class="mb-0"><i class="bi bi-gear me-2"></i>System Status</h5>
             </div>
@@ -422,11 +695,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const submitBtn = form.querySelector('button[type="submit"]');
             const originalContent = submitBtn.innerHTML;
             
-            // Show loading state
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Updating...';
             
-            // Make AJAX request
             fetch('{% url "tg:update_ticket_status" ticket.ticket_id %}', {
                 method: 'POST',
                 body: formData,
@@ -439,38 +710,41 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.success) {
                     showNotification(data.message, 'success');
                     
-                    // Update UI in real-time
+                    // Update status badge - FIXED for in_progress
                     if (data.new_status) {
                         const statusBadge = document.getElementById('currentStatusBadge');
                         if (statusBadge) {
-                            statusBadge.className = 'badge status-' + data.new_status + ' fs-5';
-                            statusBadge.textContent = data.new_status.charAt(0).toUpperCase() + data.new_status.slice(1);
+                            // Normalize status - remove spaces and keep underscores
+                            const normalizedStatus = data.new_status.toLowerCase().replace(/ /g, '');
+                            statusBadge.className = 'badge status-' + normalizedStatus + ' fs-5';
+                            statusBadge.textContent = data.new_status.charAt(0).toUpperCase() + data.new_status.slice(1).replace(/_/g, ' ');
                         }
                     }
                     
+                    // Update priority badge
                     if (data.new_priority) {
                         const priorityBadge = document.getElementById('currentPriorityBadge');
                         if (priorityBadge) {
-                            priorityBadge.className = 'badge priority-' + data.new_priority + ' fs-5';
+                            priorityBadge.className = 'badge priority-' + data.new_priority.toLowerCase() + ' fs-5';
                             priorityBadge.textContent = data.new_priority.charAt(0).toUpperCase() + data.new_priority.slice(1);
                         }
                     }
                     
+                    // Update team
                     if (data.new_team !== undefined) {
                         const teamElement = document.getElementById('currentTeam');
                         if (teamElement) {
                             if (data.new_team && data.new_team !== 'Unassigned') {
-                                teamElement.innerHTML = '<span class="badge bg-info fs-6">' + data.new_team + '</span>';
+                                teamElement.innerHTML = '<span class="badge bg-info fs-6">' + data.new_team.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) + '</span>';
                             } else {
                                 teamElement.innerHTML = '<span class="text-muted">Unassigned</span>';
                             }
                         }
                     }
                     
-                    // Reload page after 3 seconds to show all updates
                     setTimeout(() => {
                         window.location.reload();
-                    }, 3000);
+                    }, 2000);
                 } else {
                     showNotification('Error: ' + data.error, 'danger');
                 }
@@ -480,7 +754,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 showNotification('An error occurred while updating the ticket.', 'danger');
             })
             .finally(() => {
-                // Reset button state
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = originalContent;
             });
@@ -488,7 +761,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Quick action functions
 function markAsCritical() {
     document.getElementById('newPriority').value = 'critical';
     document.getElementById('newStatus').value = 'in_progress';
@@ -505,7 +777,6 @@ function markAsResolved() {
 }
 
 function showNotification(message, type = 'info') {
-    // Remove any existing notifications
     const existing = document.querySelectorAll('.custom-notification');
     existing.forEach(n => n.remove());
     
@@ -534,7 +805,6 @@ function showNotification(message, type = 'info') {
     
     document.body.appendChild(notification);
     
-    // Auto-remove after 5 seconds
     setTimeout(() => {
         if (document.body.contains(notification)) {
             notification.remove();
