@@ -30,12 +30,11 @@
     color: white !important;
 }
 
-/* CRITICAL FIX: in_progress with both underscore and hyphen variants */
-.status-in_progress, .badge.status-in_progress,
-.status-in-progress, .badge.status-in-progress,
-.status-in-progress, .badge.status-In progress {
+/* CRITICAL FIX: InProgress with both underscore and hyphen variants */
+
+.status-InProgress, .badge.status-InProgress {
     background-color: #f59e0b !important;
-    color: black !important;
+    color: white !important;
 }
 
 .status-pending, .badge.status-pending {
@@ -53,11 +52,6 @@
     color: white !important;
 }
 
-.status-on_hold, .badge.status-on_hold,
-.status-on-hold, .badge.status-on-hold {
-    background-color: #ec4899 !important;
-    color: white !important;
-}
 
 .status-reopened, .badge.status-reopened {
     background-color: #ef4444 !important;
@@ -270,9 +264,9 @@
                 <div class="row align-items-center">
                     <div class="col-md-3">
                         <h6 class="text-muted mb-1">Current Status</h6>
-                        <span class="badge status-{{ ticket.status|lower }} fs-5" id="currentStatusBadge">
-                            {% if ticket.status == 'in_progress' %}
-                                In Progress
+                        <span class="badge status-{{ ticket.status }} fs-5" id="currentStatusBadge">
+                            {% if ticket.status == 'InProgress' %}
+                                InProgress
                             {% else %}
                                 {{ ticket.status|title }}
                             {% endif %}
@@ -569,7 +563,7 @@
                         </label>
                         <select class="form-select" id="newStatus" name="status" required>
                             <option value="new" {% if ticket.status == 'new' %}selected{% endif %}>New</option>
-                            <option value="in_progress" {% if ticket.status == 'in_progress' %}selected{% endif %}>In Progress</option>
+                            <option value="InProgress" {% if ticket.status == 'InProgress' %}selected{% endif %}>InProgress</option>
                             <option value="resolved" {% if ticket.status == 'resolved' %}selected{% endif %}>Resolved</option>
                             <option value="closed" {% if ticket.status == 'closed' %}selected{% endif %}>Closed</option>
                         </select>
@@ -710,7 +704,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.success) {
                     showNotification(data.message, 'success');
                     
-                    // Update status badge - FIXED for in_progress
+                    // Update status badge - FIXED for InProgress
                     if (data.new_status) {
                         const statusBadge = document.getElementById('currentStatusBadge');
                         if (statusBadge) {
@@ -763,8 +757,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function markAsCritical() {
     document.getElementById('newPriority').value = 'critical';
-    document.getElementById('newStatus').value = 'in_progress';
-    showNotification('Set to critical priority and in progress', 'warning');
+    document.getElementById('newStatus').value = 'InProgress';
+    showNotification('Set to critical priority and InProgress', 'warning');
 }
 
 function markAsResolved() {
