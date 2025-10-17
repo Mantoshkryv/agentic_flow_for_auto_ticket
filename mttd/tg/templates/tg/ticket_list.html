@@ -27,8 +27,7 @@
     color: white !important;
 }
 
-.status-in_progress, .badge.status-in_progress, 
-.status-in-progress, .badge.status-in-progress {
+.status-InProgress, .badge.status-InProgress {
     background-color: #f59e0b !important;
     color: white !important;
 }
@@ -216,8 +215,8 @@
                                     </td>
                                     <td>
                                         <span class="badge status-{{ ticket.status|lower }} fs-6">
-                                            {% if ticket.status == 'in_progress' %}
-                                                In Progress
+                                            {% if ticket.status == 'InProgress' %}
+                                                InProgress
                                             {% else %}
                                                 {{ ticket.status|title }}
                                             {% endif %}
