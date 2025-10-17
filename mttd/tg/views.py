@@ -456,31 +456,194 @@ def process_mongodb_flexible_enhanced(target_channels=None):
 
 # CORRECTED ticket_list VIEW FUNCTION
 # FIXED views.py functions - Replace the existing functions with these
+def get_unique_root_causes():
+    """
+    FIXED: Extract unique root causes with improved parsing and predefined options
+    """
+    try:
+        import json
+        root_causes = set()
+        
+        logger.info("=" * 70)
+        logger.info("🔍 EXTRACTING UNIQUE ROOT CAUSES")
+        logger.info("=" * 70)
+        
+        # ✅ STEP 1: Add predefined root causes from ticket_engine.py
+        # These are the standard root causes that should always be available
+        predefined_causes = [
+            'Potential Entitlement/Auth Issue',
+            'Potential CDN/Manifest Issue',
+            'Potential Transient Network Issue',
+            'Technical Investigation Needed',
+            'Persistent Technical Issue'
+        ]
+        
+        for cause in predefined_causes:
+            root_causes.add(cause)
+            logger.info(f"✅ Added predefined: '{cause}'")
+        
+        # ✅ STEP 2: Extract from ticket titles (IMPROVED PARSING)
+        titles = Ticket.objects.exclude(
+            title__isnull=True
+        ).exclude(
+            title=''
+        ).values_list('title', flat=True).distinct()
+        
+        logger.info(f"📊 Analyzing {len(titles)} unique ticket titles...")
+        
+        # Severity keywords to skip (not root causes)
+        severity_keywords = ['critical', 'high', 'medium', 'low', 'vsf', 'ebvs']
+        
+        for title in titles:
+            if not title:
+                continue
+            
+            extracted_cause = None
+            
+            # Method 1: Extract from bracket notation [root_cause]
+            # Title format: "[VSF] [CRITICAL] [Potential CDN/Manifest Issue] for Viewer..."
+            import re
+            bracket_matches = re.findall(r'\[([^\]]+)\]', title)
+            
+            if len(bracket_matches) >= 3:
+                # The 3rd bracket usually contains the root cause
+                potential_cause = bracket_matches[2].strip()
+                
+                # Validate it's not a severity keyword
+                if potential_cause.lower() not in severity_keywords:
+                    extracted_cause = potential_cause
+                    logger.debug(f"✅ Extracted from brackets: '{extracted_cause}' from title: {title[:80]}")
+            
+            # Method 2: Look for "Potential" patterns (common in our root causes)
+            if not extracted_cause:
+                potential_match = re.search(r'Potential [^]]+(?:\]|for)', title)
+                if potential_match:
+                    extracted_cause = potential_match.group(0).replace(']', '').replace(' for', '').strip()
+                    logger.debug(f"✅ Extracted 'Potential' pattern: '{extracted_cause}'")
+            
+            # Method 3: Look for "Issue" patterns
+            if not extracted_cause:
+                issue_match = re.search(r'([A-Z][^]]*Issue)', title)
+                if issue_match:
+                    extracted_cause = issue_match.group(1).strip()
+                    # Skip if it's too short or just "Issue"
+                    if len(extracted_cause) > 10 and extracted_cause != 'Issue':
+                        logger.debug(f"✅ Extracted 'Issue' pattern: '{extracted_cause}'")
+                    else:
+                        extracted_cause = None
+            
+            # Add to set if we found something valid
+            if extracted_cause:
+                root_causes.add(extracted_cause)
+        
+        # ✅ STEP 3: Extract from failure_details JSON field
+        logger.info("📊 Extracting from failure_details JSON...")
+        
+        failure_details_list = Ticket.objects.exclude(
+            failure_details__isnull=True
+        ).values_list('failure_details', flat=True)
+        
+        for details in failure_details_list:
+            try:
+                if isinstance(details, dict):
+                    detail_dict = details
+                elif isinstance(details, str):
+                    detail_dict = json.loads(details)
+                else:
+                    continue
+                
+                if 'root_cause' in detail_dict:
+                    cause = detail_dict['root_cause'].strip()
+                    
+                    # Validate it's not a severity keyword and has substance
+                    if (cause and 
+                        cause.lower() not in severity_keywords and 
+                        len(cause) > 5):
+                        root_causes.add(cause)
+                        logger.debug(f"✅ Extracted from failure_details: '{cause}'")
+                        
+            except (json.JSONDecodeError, TypeError, AttributeError) as e:
+                logger.debug(f"⚠️ Could not parse failure_details: {e}")
+                continue
+        
+        # ✅ STEP 4: Create display-friendly versions with smart shortening
+        display_mapping = {
+            'Potential CDN/Manifest Issue': 'CDN/Manifest Issue',
+            'Potential Entitlement/Auth Issue': 'Entitlement/Auth Issue',
+            'Potential Transient Network Issue': 'Transient Network Issue',
+            'Technical Investigation Needed': 'Technical Investigation',
+            'Persistent Technical Issue': 'Persistent Technical Issue',
+            'Potential Authentication Issue': 'Authentication Issue',
+            'Potential Network Issue': 'Network Issue',
+        }
+        
+        # ✅ STEP 5: Build result list with smart deduplication
+        result = []
+        seen_displays = set()  # Track display names to avoid duplicates
+        
+        for cause in sorted(root_causes):
+            # Get display name
+            display = display_mapping.get(cause, cause)
+            
+            # Smart shortening for very long names
+            if len(display) > 35:
+                # Keep important words, shorten intelligently
+                if 'Issue' in display:
+                    display = display.replace('Issue', '').strip() + '...'
+                else:
+                    display = display[:32] + "..."
+            
+            # Avoid duplicate display names
+            if display.lower() not in seen_displays:
+                result.append({'value': cause, 'display': display})
+                seen_displays.add(display.lower())
+                logger.info(f"📋 Filter option: value='{cause}', display='{display}'")
+        
+        logger.info(f"\n✅ FINAL: Returning {len(result)} unique root cause filter options")
+        logger.info(f"📊 Root causes found: {[r['display'] for r in result]}")
+        logger.info("=" * 70)
+        
+        # ✅ RETURN ALL RESULTS (not just top 20)
+        return result  # Changed from result[:20]
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting unique root causes: {e}", exc_info=True)
+        
+        # ✅ FALLBACK: Return predefined causes if extraction fails
+        return [
+            {'value': 'Potential Entitlement/Auth Issue', 'display': 'Entitlement/Auth Issue'},
+            {'value': 'Potential CDN/Manifest Issue', 'display': 'CDN/Manifest Issue'},
+            {'value': 'Potential Transient Network Issue', 'display': 'Transient Network'},
+            {'value': 'Technical Investigation Needed', 'display': 'Technical Investigation'},
+            {'value': 'Persistent Technical Issue', 'display': 'Persistent Technical'},
+        ]
+
+
 def ticket_list(request):
-    """ENHANCED ticket list with root_cause/issue filter"""
+    """FIXED ticket list with proper variable naming for filters"""
     try:
         # Get filter parameters - matching what template expects
         current_search = request.GET.get('search', '').strip()
-        current_status = request.GET.get('status', '')
-        current_priority = request.GET.get('priority', '')
-        current_root_cause = request.GET.get('root_cause', '')  # NEW FILTER
+        selected_status = request.GET.get('status', '')  # RENAMED from current_status
+        selected_priority = request.GET.get('priority', '')  # RENAMED from current_priority
+        selected_root_cause = request.GET.get('root_cause', '')  # RENAMED from current_root_cause
         per_page = request.GET.get('per_page', '25')
         
         # Build queryset for displayed tickets
         tickets = Ticket.objects.all()
         
         # Apply filters
-        if current_status and current_status != 'all':
-            tickets = tickets.filter(status=current_status)
-        if current_priority and current_priority != 'all':
-            tickets = tickets.filter(priority=current_priority)
+        if selected_status and selected_status != 'all':
+            tickets = tickets.filter(status=selected_status)
+        if selected_priority and selected_priority != 'all':
+            tickets = tickets.filter(priority=selected_priority)
         
-        # NEW: Apply root_cause filter
-        if current_root_cause and current_root_cause != 'all':
+        # Apply root_cause filter
+        if selected_root_cause and selected_root_cause != 'all':
             # Filter by title (which contains root cause) or issue_type
             tickets = tickets.filter(
-                Q(title__icontains=current_root_cause) |
-                Q(issue_type__icontains=current_root_cause)
+                Q(title__icontains=selected_root_cause) |
+                Q(issue_type__icontains=selected_root_cause)
             )
         
         # Search functionality
@@ -498,14 +661,14 @@ def ticket_list(request):
         tickets = tickets.order_by('-created_at')
         
         # Get status and priority choices from Ticket model
-        current_status = []
+        status_choices = []  # RENAMED from current_status
         priority_choices = []
         
         try:
             if hasattr(Ticket, 'CURRENT_STATUS'):
-                current_status = [choice[0] for choice in Ticket.CURRENT_STATUS]
+                status_choices = [choice[0] for choice in Ticket.CURRENT_STATUS]
             else:
-                current_status = ['new', 'InProgress', 'resolved', 'closed']
+                status_choices = ['new', 'InProgress', 'resolved', 'closed']
 
             if hasattr(Ticket, 'PRIORITY_CHOICES'):
                 priority_choices = [choice[0] for choice in Ticket.PRIORITY_CHOICES]
@@ -513,10 +676,10 @@ def ticket_list(request):
                 priority_choices = ['low', 'medium', 'high', 'critical']
         except Exception as e:
             logger.warning(f"Could not get model choices: {e}")
-            current_status = ['new', 'InProgress', 'resolved', 'closed']
+            status_choices = ['new', 'InProgress', 'resolved', 'closed']
             priority_choices = ['low', 'medium', 'high', 'critical']
         
-        # NEW: Get unique root causes/issues for filter dropdown
+        # FIXED: Get unique root causes with corrected parsing
         root_cause_choices = get_unique_root_causes()
         
         # CALCULATE REAL STATISTICS
@@ -586,16 +749,16 @@ def ticket_list(request):
             total_count = paginator.count
             page_obj = paginator.get_page(request.GET.get('page'))
         
-        # Complete context with ALL required variables
+        # Complete context with ALL required variables - FIXED NAMES
         context = {
             'tickets': page_obj,
-            'current_status': current_status,
+            'status_choices': status_choices,  # FIXED: was current_status
             'priority_choices': priority_choices,
-            'root_cause_choices': root_cause_choices,  # NEW
+            'root_cause_choices': root_cause_choices,  # Now with correct parsing
             'current_search': current_search,
-            'current_status': current_status,
-            'current_priority': current_priority,
-            'current_root_cause': current_root_cause,  # NEW
+            'selected_status': selected_status,  # FIXED: renamed variable
+            'selected_priority': selected_priority,  # FIXED: renamed variable
+            'selected_root_cause': selected_root_cause,  # FIXED: renamed variable
             'total_count': total_count,
             'open_tickets_count': open_tickets_count,
             'high_priority_count': high_priority_count,
@@ -617,13 +780,13 @@ def ticket_list(request):
         
         return render(request, "tg/ticket_list.html", {
             'tickets': [],
-            'current_status': ['new', 'InProgress', 'resolved', 'closed'],
+            'status_choices': ['new', 'InProgress', 'resolved', 'closed'],
             'priority_choices': ['low', 'medium', 'high', 'critical'],
-            'root_cause_choices': [],  # NEW
+            'root_cause_choices': [],
             'current_search': '',
-            'current_status': '',
-            'current_priority': '',
-            'current_root_cause': '',  # NEW
+            'selected_status': '',
+            'selected_priority': '',
+            'selected_root_cause': '',
             'total_count': 0,
             'open_tickets_count': 0,
             'high_priority_count': 0,
@@ -633,63 +796,6 @@ def ticket_list(request):
             'resolved_tickets': 0,
             'closed_tickets': 0,
         })
-
-def get_unique_root_causes():
-    """Extract unique root causes from tickets for filter dropdown"""
-    try:
-        import json
-        root_causes = set()
-        
-        # Get from title field (primary source)
-        titles = Ticket.objects.exclude(
-            title__isnull=True
-        ).exclude(
-            title=''
-        ).values_list('title', flat=True).distinct()
-        
-        for title in titles:
-            if title:
-                root_causes.add(title.strip())
-        
-        # Get from issue_type field
-        issue_types = Ticket.objects.exclude(
-            issue_type__isnull=True
-        ).exclude(
-            issue_type=''
-        ).values_list('issue_type', flat=True).distinct()
-        
-        for issue in issue_types:
-            if issue:
-                root_causes.add(issue.strip())
-        
-        # Get from failure_details if available
-        failure_details_list = Ticket.objects.exclude(
-            failure_details__isnull=True
-        ).values_list('failure_details', flat=True)
-        
-        for details in failure_details_list:
-            try:
-                if isinstance(details, dict):
-                    detail_dict = details
-                elif isinstance(details, str):
-                    detail_dict = json.loads(details)
-                else:
-                    continue
-                
-                if 'root_cause' in detail_dict:
-                    root_causes.add(detail_dict['root_cause'].strip())
-                if 'issue' in detail_dict:
-                    root_causes.add(detail_dict['issue'].strip())
-            except (json.JSONDecodeError, TypeError, AttributeError):
-                continue
-        
-        # Sort and return as list (limit to top 20 most common)
-        sorted_causes = sorted(list(root_causes))[:20]
-        return sorted_causes
-        
-    except Exception as e:
-        logger.error(f"Error getting unique root causes: {e}")
-        return []
     
 def ticket_detail(request, ticket_id):
     """FIXED ticket detail with proper field extraction"""
@@ -777,6 +883,7 @@ def ticket_detail(request, ticket_id):
                     channel_sources.append(f"failure_details: {channel_name}")
 
                 # Extract root cause from failure details
+                # ✅ CORRECT
                 root_cause = failure_details.get('root_cause') or failure_details.get('issue') or failure_details.get('error')
 
             except (json.JSONDecodeError, TypeError) as e:
