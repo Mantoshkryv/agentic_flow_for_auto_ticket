@@ -220,7 +220,7 @@ class EnhancedTicketValidator:
         
         # 8. Status validation
         if 'status' in ticket:
-            valid_statuses = ['new', 'in_progress', 'resolved', 'closed', 'on_hold']
+            valid_statuses = ['new', 'InProgress', 'resolved', 'closed']
             if ticket['status'] not in valid_statuses:
                 warnings.append(f"Unknown status: {ticket['status']}")
         
