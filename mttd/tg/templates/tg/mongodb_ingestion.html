@@ -211,7 +211,7 @@
                             <label for="default_status" class="form-label">Default Ticket Status</label>
                             <select class="form-select" id="default_status" name="default_status">
                                 <option value="new" selected>New</option>
-                                <option value="inprogress">In Progress</option>
+                                <option value="InProgress">InProgress</option>
                             </select>
                         </div>
                         <div class="col-md-6">
@@ -300,7 +300,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Real-time data count updates (optional)
-    function updateDataCounts() {
+    function updateData_Counts() {
         fetch('/tg/api/data-status/')
             .then(response => response.json())
             .then(data => {
@@ -315,7 +315,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Update counts every 30 seconds
-    setInterval(updateDataCounts, 30000);
+    setInterval(updateData_Counts, 30000);
 
     // Add hover effects to cards
     const cards = document.querySelectorAll('.card:not(.bg-light)');
