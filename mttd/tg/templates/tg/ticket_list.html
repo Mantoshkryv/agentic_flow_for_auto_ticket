@@ -112,9 +112,13 @@
                         <label for="statusFilter" class="form-label">Status</label>
                         <select class="form-select" id="statusFilter" name="status">
                             <option value="">All Statuses</option>
-                            {% for status in current_status %}
-                                <option value="{{ status }}" {% if status == current_status %}selected{% endif %}>
-                                    {{ status|title }}
+                            {% for status in status_choices %}
+                                <option value="{{ status }}" {% if status == selected_status %}selected{% endif %}>
+                                    {% if status == 'InProgress' %}
+                                        InProgress
+                                    {% else %}
+                                        {{ status|title }}
+                                    {% endif %}
                                 </option>
                             {% endfor %}
                         </select>
@@ -124,7 +128,7 @@
                         <select class="form-select" id="priorityFilter" name="priority">
                             <option value="">All Priorities</option>
                             {% for priority in priority_choices %}
-                                <option value="{{ priority }}" {% if priority == current_priority %}selected{% endif %}>
+                                <option value="{{ priority }}" {% if priority == selected_priority %}selected{% endif %}>
                                     {{ priority|title }}
                                 </option>
                             {% endfor %}
@@ -132,12 +136,12 @@
                     </div>
                     <!-- NEW ROOT CAUSE FILTER -->
                     <div class="col-md-2">
-                        <label for="rootCauseFilter" class="form-label">Root Cause/Issue</label>
+                        <label for="rootCauseFilter" class="form-label">Root Cause </label>
                         <select class="form-select" id="rootCauseFilter" name="root_cause">
                             <option value="">All Issues</option>
-                            {% for root_cause in root_cause_choices %}
-                                <option value="{{ root_cause }}" {% if root_cause == current_root_cause %}selected{% endif %}>
-                                    {{ root_cause|truncatewords:4 }}
+                            {% for choice in root_cause_choices %}
+                                <option value="{{ choice.value }}" {% if choice.value == selected_root_cause %}selected{% endif %}>
+                                    {{ choice.display }}
                                 </option>
                             {% endfor %}
                         </select>
@@ -160,6 +164,27 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- FIXED: Update the filter status display -->
+<div class="card-header">
+    <div class="d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+            <i class="bi bi-list-ul me-2"></i>All Tickets
+            {% if current_search or selected_status or selected_priority or selected_root_cause %}
+                <small class="text-muted">(Filtered)</small>
+            {% endif %}
+        </h5>
+        <div class="d-flex align-items-center gap-3">
+            {% if total_tickets %}
+            <small class="text-muted">
+                <i class="bi bi-info-circle me-1"></i>
+                {{ open_tickets_count }} open of {{ total_tickets }} total
+            </small>
+            {% endif %}
+            <span class="badge bg-primary">{{ tickets|length }} showing</span>
         </div>
     </div>
 </div>
@@ -434,7 +459,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Make table rows clickable 
+    // Make table rows clickable
     document.querySelectorAll('.ticket-row').forEach(row => {
         row.addEventListener('click', function(e) {
             // Don't trigger if clicking on action buttons
