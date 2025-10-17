@@ -505,7 +505,7 @@ def ticket_list(request):
             if hasattr(Ticket, 'CURRENT_STATUS'):
                 current_status = [choice[0] for choice in Ticket.CURRENT_STATUS]
             else:
-                current_status = ['new', 'in_progress', 'resolved', 'closed']
+                current_status = ['new', 'InProgress', 'resolved', 'closed']
 
             if hasattr(Ticket, 'PRIORITY_CHOICES'):
                 priority_choices = [choice[0] for choice in Ticket.PRIORITY_CHOICES]
@@ -513,7 +513,7 @@ def ticket_list(request):
                 priority_choices = ['low', 'medium', 'high', 'critical']
         except Exception as e:
             logger.warning(f"Could not get model choices: {e}")
-            current_status = ['new', 'in_progress', 'resolved', 'closed']
+            current_status = ['new', 'InProgress', 'resolved', 'closed']
             priority_choices = ['low', 'medium', 'high', 'critical']
         
         # NEW: Get unique root causes/issues for filter dropdown
@@ -605,7 +605,7 @@ def ticket_list(request):
             'resolved_tickets': all_tickets.filter(status='resolved').count(),
             'closed_tickets': all_tickets.filter(status='closed').count(),
             'new_tickets': all_tickets.filter(status='new').count(),
-            'in_progress_tickets': all_tickets.filter(status='in_progress').count(),
+            'InProgress_tickets': all_tickets.filter(status='InProgress').count(),
             'critical_tickets': all_tickets.filter(priority='critical').count(),
         }
         
@@ -617,7 +617,7 @@ def ticket_list(request):
         
         return render(request, "tg/ticket_list.html", {
             'tickets': [],
-            'current_status': ['new', 'in_progress', 'resolved', 'closed'],
+            'current_status': ['new', 'InProgress', 'resolved', 'closed'],
             'priority_choices': ['low', 'medium', 'high', 'critical'],
             'root_cause_choices': [],  # NEW
             'current_search': '',
@@ -908,10 +908,10 @@ def update_ticket_status(request, ticket_id):
                     if hasattr(Ticket, 'CURRENT_STATUS'):
                         valid_statuses = [choice[0] for choice in Ticket.CURRENT_STATUS]
                     else:
-                        valid_statuses = ['new', 'in_progress', 'resolved', 'closed']
+                        valid_statuses = ['new', 'InProgress', 'resolved', 'closed']
                 except:
-                    valid_statuses = ['new', 'in_progress', 'resolved', 'closed']
-                    
+                    valid_statuses = ['new', 'InProgress', 'resolved', 'closed']
+
                 if new_status not in valid_statuses:
                     return JsonResponse({
                         "success": False, 
