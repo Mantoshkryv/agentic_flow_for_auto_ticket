@@ -442,10 +442,9 @@ class Ticket(BaseModel):
     
     CURRENT_STATUS = [
         ('new', _('New')),
-        ('in_progress', _('In_Progress')),
+        ('InProgress', _('InProgress')),
         ('resolved', _('Resolved')),
         ('closed', _('Closed')),
-        ('on_hold', _('On_Hold')),
     ]
     
     PRIORITY_CHOICES = [
@@ -948,7 +947,7 @@ class UnifiedDataManager:
             'tickets': {
                 'total': Ticket.objects.count(),
                 'new': Ticket.objects.filter(status='new').count(),
-                'in_progress': Ticket.objects.filter(status='in_progress').count(),
+                'InProgress': Ticket.objects.filter(status='InProgress').count(),
                 'resolved': Ticket.objects.filter(status='resolved').count(),
                 'session_based': Ticket.objects.exclude(session_id__isnull=True).count(),
                 'high_confidence': Ticket.objects.filter(confidence_score__gte=0.8).count(),
