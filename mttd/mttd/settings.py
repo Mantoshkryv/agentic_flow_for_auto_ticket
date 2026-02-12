@@ -88,8 +88,15 @@ WSGI_APPLICATION = 'mttd.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    "default": django_mongodb_backend.parse_uri("mongodb+srv://krmanto:Learn9900@cluster0.vp38vxp.mongodb.net/mttddb?retryWrites=true&w=majority"),
+    "default": {
+        "ENGINE": "django_mongodb_backend",
+        "NAME": "mttddb",
+        "CLIENT": {
+            "host": "mongodb+srv://krmanto:Learn9900@cluster0.vp38vxp.mongodb.net/mttddb?retryWrites=true&w=majority",
+        },
+    }
 }
+
 
 # Database routers
 # https://docs.djangoproject.com/en/dev/ref/settings/#database-routers
@@ -141,6 +148,7 @@ MIGRATION_MODULES = {
     'auth': 'mongo_migrations.auth',
     'contenttypes': 'mongo_migrations.contenttypes',
 }
+
 
 
 
